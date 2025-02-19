@@ -17,12 +17,10 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using NodaTime;
+using System.Linq;
 using NUnit.Framework;
 using QuantConnect.Data;
-using QuantConnect.Data.Auxiliary;
 using QuantConnect.Data.Market;
-using QuantConnect.Data.UniverseSelection;
 using QuantConnect.Interfaces;
 using QuantConnect.Lean.Engine.DataFeeds;
 using QuantConnect.Securities;
@@ -60,12 +58,12 @@ namespace QuantConnect.Tests.Engine.DataFeeds
                 false,
                 false,
                 false);
+            using var testDataCacheProvider = new TestDataCacheProvider() { Data = data};
             using var dataReader = new SubscriptionDataReader(config,
                 new HistoryRequest(config, entry.ExchangeHours, start, end),
                 TestGlobals.MapFileProvider,
                 TestGlobals.FactorFileProvider,
-                new TestDataCacheProvider
-                { Data = data },
+                testDataCacheProvider,
                 TestGlobals.DataProvider,
                 null);
 
@@ -74,13 +72,67 @@ namespace QuantConnect.Tests.Engine.DataFeeds
 
         }
 
+        [TestCase(typeof(TradeBar))]
+        [TestCase(typeof(QuoteBar))]
+        [TestCase(typeof(OpenInterest))]
+        public void EmitsNewTradableDateWhenDateAfterDelistingIsNonTradable(Type dataType)
+        {
+            var start = new DateTime(2023, 06, 30);
+            var end = new DateTime(2023, 08, 01);
+
+            var symbol = Symbol.CreateOption(
+                Symbols.SPX,
+                "SPXW",
+                Market.USA,
+                OptionStyle.European,
+                OptionRight.Call,
+                4445m,
+                // Next day is a holiday
+                new DateTime(2023, 7, 3));
+
+            var entry = MarketHoursDatabase.FromDataFolder().GetEntry(symbol.ID.Market, symbol, symbol.SecurityType);
+            var config = new SubscriptionDataConfig(dataType,
+                symbol,
+                Resolution.Minute,
+                entry.DataTimeZone,
+                entry.ExchangeHours.TimeZone,
+                false,
+                false,
+                false);
+            using var testDataCacheProvider = new TestDataCacheProvider();
+            var request = new HistoryRequest(config, entry.ExchangeHours, start, end);
+            using var dataReader = new SubscriptionDataReader(config,
+                request,
+                TestGlobals.MapFileProvider,
+                TestGlobals.FactorFileProvider,
+                testDataCacheProvider,
+                TestGlobals.DataProvider,
+                null);
+
+            var expectedLastTradableDate = new DateTime(2023, 07, 05);
+            var lastTradableDate = default(DateTime);
+
+            dataReader.NewTradableDate += (sender, args) =>
+            {
+                lastTradableDate = args.Date;
+            };
+
+            while (dataReader.MoveNext())
+            {
+            }
+
+            Assert.AreEqual(expectedLastTradableDate, lastTradableDate);
+        }
+
         private class TestDataCacheProvider : IDataCacheProvider
         {
+            private StreamWriter _writer;
             private bool _alreadyEmitted;
 
             public string Data { get; set; }
             public void Dispose()
             {
+                _writer.DisposeSafely();
             }
             public List<string> GetZipEntries(string zipFile)
             {
@@ -96,9 +148,9 @@ namespace QuantConnect.Tests.Engine.DataFeeds
                 _alreadyEmitted = true;
 
                 var stream = new MemoryStream();
-                var writer = new StreamWriter(stream);
-                writer.Write(Data);
-                writer.Flush();
+                _writer = new StreamWriter(stream);
+                _writer.Write(Data);
+                _writer.Flush();
                 stream.Position = 0;
                 return stream;
             }

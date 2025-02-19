@@ -68,6 +68,9 @@ namespace QuantConnect
             Tuple.Create(BinanceUS, 36),
             Tuple.Create(Bybit, 37),
             Tuple.Create(Coinbase, 38),
+            Tuple.Create(InteractiveBrokers, 39),
+            Tuple.Create(EUREX, 40),
+            Tuple.Create(OSE, 41)
         };
 
         static Market()
@@ -153,6 +156,11 @@ namespace QuantConnect
         public const string CME = "cme";
 
         /// <summary>
+        /// EUREX
+        /// </summary>
+        public const string EUREX = "eurex";
+
+        /// <summary>
         /// Singapore Exchange
         /// </summary>
         public const string SGX = "sgx";
@@ -161,6 +169,11 @@ namespace QuantConnect
         /// Hong Kong Exchange
         /// </summary>
         public const string HKFE = "hkfe";
+
+        /// <summary>
+        /// Osaka Stock Exchange
+        /// </summary>
+        public const string OSE = "ose";
 
         /// <summary>
         /// London International Financial Futures and Options Exchange
@@ -242,6 +255,11 @@ namespace QuantConnect
         /// Coinbase
         /// </summary>
         public const string Coinbase = "coinbase";
+
+        /// <summary>
+        /// InteractiveBrokers market
+        /// </summary>
+        public const string InteractiveBrokers = "interactivebrokers";
 
         /// <summary>
         /// Adds the specified market to the map of available markets with the specified identifier.

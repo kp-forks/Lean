@@ -54,7 +54,7 @@ namespace QuantConnect.Lean.Engine.Storage
         /// <summary>
         /// Gets the default object store location
         /// </summary>
-        public static string DefaultObjectStore => Path.GetFullPath(Config.Get("object-store-root", "./storage"));
+        public static string DefaultObjectStore { get; set; } = Path.GetFullPath(Config.Get("object-store-root", "./storage"));
 
         /// <summary>
         /// Flag indicating the state of this object storage has changed since the last <seealso cref="Persist"/> invocation
@@ -62,7 +62,6 @@ namespace QuantConnect.Lean.Engine.Storage
         private volatile bool _dirty;
 
         private Timer _persistenceTimer;
-        private readonly string _storageRoot = DefaultObjectStore;
         private Regex _pathRegex = new (@"^\.?[a-zA-Z0-9\\/_#\-\$= ]+\.?[a-zA-Z0-9]*$", RegexOptions.Compiled);
         private readonly ConcurrentDictionary<string, ObjectStoreEntry> _storage = new();
         private readonly object _persistLock = new object();
@@ -91,10 +90,12 @@ namespace QuantConnect.Lean.Engine.Storage
         /// <param name="controls">The job controls instance</param>
         public virtual void Initialize(int userId, int projectId, string userToken, Controls controls)
         {
-            AlgorithmStorageRoot = _storageRoot;
+            AlgorithmStorageRoot = StorageRoot();
 
             // create the root path if it does not exist
             var directoryInfo = FileHandler.CreateDirectory(AlgorithmStorageRoot);
+            // full name will return a normalized path which is later easier to compare
+            AlgorithmStorageRoot = directoryInfo.FullName;
 
             Controls = controls;
 
@@ -105,6 +106,14 @@ namespace QuantConnect.Lean.Engine.Storage
             }
 
             Log.Trace($"LocalObjectStore.Initialize(): Storage Root: {directoryInfo.FullName}. StorageFileCount {controls.StorageFileCount}. StorageLimit {BytesToMb(controls.StorageLimit)}MB");
+        }
+
+        /// <summary>
+        /// Storage root path
+        /// </summary>
+        protected virtual string StorageRoot()
+        {
+            return DefaultObjectStore;
         }
 
         /// <summary>
@@ -410,7 +419,18 @@ namespace QuantConnect.Lean.Engine.Storage
             }
 
             // Fetch the path to file and return it
-            return PathForKey(path);
+            var normalizedPathKey = PathForKey(path);
+
+            var parent = Directory.GetParent(normalizedPathKey);
+            if (parent != null && parent.FullName != AlgorithmStorageRoot)
+            {
+                // let's create the parent folder if it's not the root storage and it does not exist
+                if (!FileHandler.DirectoryExists(parent.FullName))
+                {
+                    FileHandler.CreateDirectory(parent.FullName);
+                }
+            }
+            return normalizedPathKey;
         }
 
         /// <summary>
@@ -548,7 +568,7 @@ namespace QuantConnect.Lean.Engine.Storage
 
                 return true;
             }
-            catch (Exception err) 
+            catch (Exception err)
             {
                 Log.Error(err, "LocalObjectStore.PersistData()");
                 OnErrorRaised(err);

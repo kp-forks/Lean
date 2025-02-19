@@ -49,11 +49,12 @@ namespace QuantConnect.Scheduling
         /// </summary>
         /// <param name="securities">Securities manager containing the algorithm's securities</param>
         /// <param name="timeZone">The algorithm's time zone</param>
-        public ScheduleManager(SecurityManager securities, DateTimeZone timeZone)
+        /// <param name="marketHoursDatabase">The market hours database instance to use</param>
+        public ScheduleManager(SecurityManager securities, DateTimeZone timeZone, MarketHoursDatabase marketHoursDatabase)
         {
             _securities = securities;
-            DateRules = new DateRules(securities, timeZone);
-            TimeRules = new TimeRules(securities, timeZone);
+            DateRules = new DateRules(securities, timeZone, marketHoursDatabase);
+            TimeRules = new TimeRules(securities, timeZone, marketHoursDatabase);
 
             // used for storing any events before the event schedule is set
             _preInitializedEvents = new List<ScheduledEvent>();
@@ -280,7 +281,7 @@ namespace QuantConnect.Scheduling
         /// </summary>
         internal static IEnumerable<DateTime> GetDatesDeferred(IDateRule dateRule, SecurityManager securities)
         {
-            foreach (var item in dateRule.GetDates(securities.UtcTime.Date.AddDays(-1), Time.EndOfTime))
+            foreach (var item in dateRule.GetDates(DateTime.SpecifyKind(securities.UtcTime.Date.AddDays(-1), DateTimeKind.Unspecified), Time.EndOfTime))
             {
                 yield return item;
             }

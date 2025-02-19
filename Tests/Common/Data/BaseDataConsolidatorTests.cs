@@ -1,4 +1,4 @@
-﻿/*
+/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
  * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
  *
@@ -15,7 +15,9 @@
 */
 
 using System;
+using System.Collections.Generic;
 using NUnit.Framework;
+using QuantConnect.Data;
 using QuantConnect.Data.Consolidators;
 using QuantConnect.Data.Market;
 using QuantConnect.Indicators;
@@ -23,13 +25,13 @@ using QuantConnect.Indicators;
 namespace QuantConnect.Tests.Common.Data
 {
     [TestFixture]
-    public class BaseDataConsolidatorTests
+    public class BaseDataConsolidatorTests: BaseConsolidatorTests
     {
         [Test]
         public void AggregatesTickToNewTradeBarProperly()
         {
             TradeBar newTradeBar = null;
-            var creator = new BaseDataConsolidator(4);
+            using var creator = new BaseDataConsolidator(4);
             creator.DataConsolidated += (sender, tradeBar) =>
             {
                 newTradeBar = tradeBar;
@@ -89,7 +91,7 @@ namespace QuantConnect.Tests.Common.Data
         [Test]
         public void DoesNotConsolidateDifferentSymbols()
         {
-            var consolidator = new BaseDataConsolidator(2);
+            using var consolidator = new BaseDataConsolidator(2);
 
             var reference = DateTime.Today;
 
@@ -119,7 +121,7 @@ namespace QuantConnect.Tests.Common.Data
         public void AggregatesTradeBarsProperly()
         {
             TradeBar newTradeBar = null;
-            var creator = new TradeBarConsolidator(4);
+            using var creator = new TradeBarConsolidator(4);
             creator.DataConsolidated += (sender, args) =>
             {
                 newTradeBar = args;
@@ -196,7 +198,7 @@ namespace QuantConnect.Tests.Common.Data
         public void AggregatesPeriodInCountModeWithHourlyData()
         {
             TradeBar consolidated = null;
-            var consolidator = new BaseDataConsolidator(2);
+            using var consolidator = new BaseDataConsolidator(2);
             consolidator.DataConsolidated += (sender, bar) =>
             {
                 consolidated = bar;
@@ -235,7 +237,7 @@ namespace QuantConnect.Tests.Common.Data
         public void AggregatesPeriodInPeriodModeWithDailyData()
         {
             TradeBar consolidated = null;
-            var consolidator = new BaseDataConsolidator(TimeSpan.FromDays(1));
+            using var consolidator = new BaseDataConsolidator(TimeSpan.FromDays(1));
             consolidator.DataConsolidated += (sender, bar) =>
             {
                 consolidated = bar;
@@ -264,7 +266,7 @@ namespace QuantConnect.Tests.Common.Data
         public void AggregatesPeriodInPeriodModeWithDailyDataAndRoundedTime()
         {
             TradeBar consolidated = null;
-            var consolidator = new BaseDataConsolidator(TimeSpan.FromDays(1));
+            using var consolidator = new BaseDataConsolidator(TimeSpan.FromDays(1));
             consolidator.DataConsolidated += (sender, bar) =>
             {
                 consolidated = bar;
@@ -295,7 +297,7 @@ namespace QuantConnect.Tests.Common.Data
         [Test]
         public void ConsolidatesWithRegisterIndicator()
         {
-            var consolidator = new BaseDataConsolidator(TimeSpan.FromMinutes(5));
+            using var consolidator = new BaseDataConsolidator(TimeSpan.FromMinutes(5));
             consolidator.DataConsolidated += OnFiveMinutes;
 
             indicator = new SimpleMovingAverage(2);
@@ -329,6 +331,30 @@ namespace QuantConnect.Tests.Common.Data
             consolidator.DataConsolidated += (sender, consolidated) =>
             {
                 indicator.Update(consolidated.EndTime, consolidated.Value);
+            };
+        }
+
+        protected override IDataConsolidator CreateConsolidator()
+        {
+            return new BaseDataConsolidator(4);
+        }
+
+        protected override IEnumerable<IBaseData> GetTestValues()
+        {
+            var time = new DateTime(2015, 04, 13, 8, 31, 0);
+            return new List<TradeBar>()
+            {
+                new TradeBar(){ Time = time, Period = Time.OneMinute, Symbol = Symbols.SPY, High = 10 },
+                new TradeBar(){ Time = time.AddMinutes(1), Period = Time.OneMinute, Symbol = Symbols.SPY, High = 12, Close = 5 },
+                new TradeBar(){ Time = time.AddMinutes(2), Period = Time.OneMinute, Symbol = Symbols.SPY, High = 10, Close = 7  },
+                new TradeBar(){ Time = time.AddMinutes(3), Period = Time.OneMinute, Symbol = Symbols.SPY, High = 5, Close = 2  },
+                new TradeBar(){ Time = time.AddMinutes(4), Period = Time.OneMinute, Symbol = Symbols.SPY, High = 15 , Close = 2 },
+                new TradeBar(){ Time = time.AddMinutes(5), Period = Time.OneMinute, Symbol = Symbols.SPY, High = 20 , Close = 2 },
+                new TradeBar(){ Time = time.AddMinutes(6), Period = Time.OneMinute, Symbol = Symbols.SPY, High = 18 , Close = 8 },
+                new TradeBar(){ Time = time.AddMinutes(7), Period = Time.OneMinute, Symbol = Symbols.SPY, High = 12 , Close = 4 },
+                new TradeBar(){ Time = time.AddMinutes(8), Period = Time.OneMinute, Symbol = Symbols.SPY, High = 25 , Close = 5 },
+                new TradeBar(){ Time = time.AddMinutes(9), Period = Time.OneMinute, Symbol = Symbols.SPY, High = 30 , Close = 4 },
+                new TradeBar(){ Time = time.AddMinutes(10), Period = Time.OneMinute, Symbol = Symbols.SPY, High = 26 , Close = 7 },
             };
         }
     }

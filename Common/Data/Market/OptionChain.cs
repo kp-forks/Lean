@@ -17,6 +17,10 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using Python.Runtime;
+using QuantConnect.Data.UniverseSelection;
+using QuantConnect.Python;
+using QuantConnect.Securities;
 using QuantConnect.Securities.Option;
 using QuantConnect.Util;
 
@@ -29,11 +33,14 @@ namespace QuantConnect.Data.Market
     public class OptionChain : BaseData, IEnumerable<OptionContract>
     {
         private readonly Dictionary<Type, Dictionary<Symbol, List<BaseData>>> _auxiliaryData = new Dictionary<Type, Dictionary<Symbol, List<BaseData>>>();
+        private readonly Lazy<PyObject> _dataframe;
+        private readonly bool _flatten;
 
         /// <summary>
         /// Gets the most recent trade information for the underlying. This may
         /// be a <see cref="Tick"/> or a <see cref="TradeBar"/>
         /// </summary>
+        [PandasIgnore]
         public BaseData Underlying
         {
             get; internal set;
@@ -42,6 +49,7 @@ namespace QuantConnect.Data.Market
         /// <summary>
         /// Gets all ticks for every option contract in this chain, keyed by option symbol
         /// </summary>
+        [PandasIgnore]
         public Ticks Ticks
         {
             get; private set;
@@ -50,6 +58,7 @@ namespace QuantConnect.Data.Market
         /// <summary>
         /// Gets all trade bars for every option contract in this chain, keyed by option symbol
         /// </summary>
+        [PandasIgnore]
         public TradeBars TradeBars
         {
             get; private set;
@@ -58,6 +67,7 @@ namespace QuantConnect.Data.Market
         /// <summary>
         /// Gets all quote bars for every option contract in this chain, keyed by option symbol
         /// </summary>
+        [PandasIgnore]
         public QuoteBars QuoteBars
         {
             get; private set;
@@ -74,17 +84,35 @@ namespace QuantConnect.Data.Market
         /// <summary>
         /// Gets the set of symbols that passed the <see cref="Option.ContractFilter"/>
         /// </summary>
+        [PandasIgnore]
         public HashSet<Symbol> FilteredContracts
         {
             get; private set;
         }
 
         /// <summary>
+        /// The data frame representation of the option chain
+        /// </summary>
+        [PandasIgnore]
+        public PyObject DataFrame => _dataframe.Value;
+
+        /// <summary>
         /// Initializes a new default instance of the <see cref="OptionChain"/> class
         /// </summary>
-        private OptionChain()
+        private OptionChain(bool flatten)
         {
             DataType = MarketDataType.OptionChain;
+            _flatten = flatten;
+            _dataframe = new Lazy<PyObject>(
+                () =>
+                {
+                    if (!PythonEngine.IsInitialized)
+                    {
+                        return null;
+                    }
+                    return new PandasConverter().GetDataFrame(new[] { this }, symbolOnlyIndex: true, flatten: _flatten);
+                },
+                isThreadSafe: false);
         }
 
         /// <summary>
@@ -92,7 +120,9 @@ namespace QuantConnect.Data.Market
         /// </summary>
         /// <param name="canonicalOptionSymbol">The symbol for this chain.</param>
         /// <param name="time">The time of this chain</param>
-        public OptionChain(Symbol canonicalOptionSymbol, DateTime time)
+        /// <param name="flatten">Whether to flatten the data frame</param>
+        public OptionChain(Symbol canonicalOptionSymbol, DateTime time, bool flatten = true)
+            : this(flatten)
         {
             Time = time;
             Symbol = canonicalOptionSymbol;
@@ -115,7 +145,10 @@ namespace QuantConnect.Data.Market
         /// <param name="quotes">All quote data for the entire option chain</param>
         /// <param name="contracts">All contracts for this option chain</param>
         /// <param name="filteredContracts">The filtered list of contracts for this option chain</param>
-        public OptionChain(Symbol canonicalOptionSymbol, DateTime time, BaseData underlying, IEnumerable<BaseData> trades, IEnumerable<BaseData> quotes, IEnumerable<OptionContract> contracts, IEnumerable<Symbol> filteredContracts)
+        /// <param name="flatten">Whether to flatten the data frame</param>
+        public OptionChain(Symbol canonicalOptionSymbol, DateTime time, BaseData underlying, IEnumerable<BaseData> trades,
+            IEnumerable<BaseData> quotes, IEnumerable<OptionContract> contracts, IEnumerable<Symbol> filteredContracts, bool flatten = true)
+            : this(flatten)
         {
             Time = time;
             Underlying = underlying;
@@ -173,6 +206,34 @@ namespace QuantConnect.Data.Market
             foreach (var contract in contracts)
             {
                 Contracts[contract.Symbol] = contract;
+            }
+        }
+
+        /// <summary>
+        /// Initializes a new option chain for a list of contracts as <see cref="OptionUniverse"/> instances
+        /// </summary>
+        /// <param name="canonicalOptionSymbol">The canonical option symbol</param>
+        /// <param name="time">The time of this chain</param>
+        /// <param name="contracts">The list of contracts data</param>
+        /// <param name="symbolProperties">The option symbol properties</param>
+        /// <param name="flatten">Whether to flatten the data frame</param>
+        public OptionChain(Symbol canonicalOptionSymbol, DateTime time, IEnumerable<OptionUniverse> contracts, SymbolProperties symbolProperties,
+            bool flatten = true)
+            : this(canonicalOptionSymbol, time, flatten)
+        {
+            Time = time;
+            Symbol = canonicalOptionSymbol;
+            DataType = MarketDataType.OptionChain;
+
+            Ticks = new Ticks(time);
+            TradeBars = new TradeBars(time);
+            QuoteBars = new QuoteBars(time);
+            Contracts = new OptionContracts(time);
+
+            foreach (var contractData in contracts)
+            {
+                Contracts[contractData.Symbol] = OptionContract.Create(contractData, symbolProperties);
+                Underlying ??= contractData.Underlying;
             }
         }
 
@@ -277,7 +338,7 @@ namespace QuantConnect.Data.Market
         /// <returns>A clone of the current object</returns>
         public override BaseData Clone()
         {
-            return new OptionChain
+            return new OptionChain(_flatten)
             {
                 Underlying = Underlying,
                 Ticks = Ticks,

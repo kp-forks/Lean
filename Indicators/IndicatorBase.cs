@@ -232,6 +232,7 @@ namespace QuantConnect.Indicators
     public abstract class IndicatorBase<T> : IndicatorBase
         where T : IBaseData
     {
+        private bool _loggedForwardOnlyIndicatorError;
 
         /// <summary>the most recent input that was given to this indicator</summary>
         private Dictionary<SecurityIdentifier, T> _previousInput = new Dictionary<SecurityIdentifier, T>();
@@ -242,7 +243,7 @@ namespace QuantConnect.Indicators
         /// <param name="name">The name of this indicator</param>
         protected IndicatorBase(string name)
             : base(name)
-        {}
+        { }
 
         /// <summary>
         /// Updates the state of this indicator with the given value and returns true
@@ -255,8 +256,12 @@ namespace QuantConnect.Indicators
             T _previousSymbolInput = default(T);
             if (_previousInput.TryGetValue(input.Symbol.ID, out _previousSymbolInput) && input.EndTime < _previousSymbolInput.EndTime)
             {
-                // if we receive a time in the past, log and return
-                Log.Error($"This is a forward only indicator: {Name} Input: {input.EndTime:u} Previous: {_previousSymbolInput.EndTime:u}. It will not be updated with this input.");
+                if (!_loggedForwardOnlyIndicatorError)
+                {
+                    _loggedForwardOnlyIndicatorError = true;
+                    // if we receive a time in the past, log once and return
+                    Log.Error($"IndicatorBase.Update(): This is a forward only indicator: {Name} Input: {input.EndTime:u} Previous: {_previousSymbolInput.EndTime:u}. It will not be updated with this input.");
+                }
                 return IsReady;
             }
             if (!ReferenceEquals(input, _previousSymbolInput))
@@ -266,7 +271,14 @@ namespace QuantConnect.Indicators
 
                 if (!(input is T))
                 {
-                    throw new ArgumentException($"IndicatorBase.Update() 'input' expected to be of type {typeof(T)} but is of type {input.GetType()}");
+                    if (typeof(T) == typeof(IndicatorDataPoint))
+                    {
+                        input = new IndicatorDataPoint(input.EndTime, input.Value);
+                    }
+                    else
+                    {
+                        throw new ArgumentException($"IndicatorBase.Update() 'input' expected to be of type {typeof(T)} but is of type {input.GetType()}");
+                    }
                 }
                 _previousInput[input.Symbol.ID] = (T)input;
 

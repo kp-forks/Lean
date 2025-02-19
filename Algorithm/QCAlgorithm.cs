@@ -33,9 +33,12 @@ using QuantConnect.Securities;
 using QuantConnect.Securities.Cfd;
 using QuantConnect.Securities.Equity;
 using QuantConnect.Securities.Forex;
+using QuantConnect.Securities.IndexOption;
 using QuantConnect.Securities.Option;
 using QuantConnect.Statistics;
 using QuantConnect.Util;
+using QuantConnect.Data.Market;
+using QuantConnect.Data.Fundamental;
 using System.Collections.Concurrent;
 using QuantConnect.Securities.Future;
 using QuantConnect.Securities.Crypto;
@@ -50,7 +53,10 @@ using Index = QuantConnect.Securities.Index.Index;
 using QuantConnect.Securities.CryptoFuture;
 using QuantConnect.Algorithm.Framework.Alphas.Analysis;
 using QuantConnect.Algorithm.Framework.Portfolio.SignalExports;
-using QuantConnect.Data.Fundamental;
+using Python.Runtime;
+using QuantConnect.Commands;
+using Newtonsoft.Json;
+using QuantConnect.Securities.Index;
 
 namespace QuantConnect.Algorithm
 {
@@ -111,6 +117,9 @@ namespace QuantConnect.Algorithm
         private ConcurrentQueue<string> _errorMessages = new ConcurrentQueue<string>();
         private IStatisticsService _statisticsService;
         private IBrokerageModel _brokerageModel;
+
+        private readonly HashSet<string> _oneTimeCommandErrors = new();
+        private readonly Dictionary<string, Func<CallbackCommand, bool?>> _registeredCommands = new(StringComparer.InvariantCultureIgnoreCase);
 
         //Error tracking to avoid message flooding:
         private string _previousDebugMessage = "";
@@ -181,7 +190,7 @@ namespace QuantConnect.Algorithm
             DefaultOrderProperties = new OrderProperties();
 
             //Initialise Data Manager
-            SubscriptionManager = new SubscriptionManager();
+            SubscriptionManager = new SubscriptionManager(_timeKeeper);
 
             Securities = new SecurityManager(_timeKeeper);
             Transactions = new SecurityTransactionManager(this, Securities);
@@ -205,7 +214,7 @@ namespace QuantConnect.Algorithm
             UniverseSettings = new UniverseSettings(Resolution.Minute, Security.NullLeverage, true, false, TimeSpan.FromDays(1));
 
             // initialize our scheduler, this acts as a liason to the real time handler
-            Schedule = new ScheduleManager(Securities, TimeZone);
+            Schedule = new ScheduleManager(Securities, TimeZone, MarketHoursDatabase);
 
             // initialize the trade builder
             SetTradeBuilder(new TradeBuilder(FillGroupingMethod.FillToFill, FillMatchingMethod.FIFO));
@@ -465,6 +474,9 @@ namespace QuantConnect.Algorithm
         /// Gets the option chain provider, used to get the list of option contracts for an underlying symbol
         /// </summary>
         [DocumentationAttribute(AddingData)]
+        [Obsolete("OptionChainProvider property is will soon be deprecated. " +
+            "The new OptionChain() method should be used to fetch equity and index option chains, " +
+            "which will contain additional data per contract, like daily price data, implied volatility and greeks.")]
         public IOptionChainProvider OptionChainProvider { get; private set; }
 
         /// <summary>
@@ -815,6 +827,11 @@ namespace QuantConnect.Algorithm
                 SetFinishedWarmingUp();
             }
 
+            if (Settings.DailyPreciseEndTime)
+            {
+                Debug("Accurate daily end-times now enabled by default. See more at https://qnt.co/3YHaWHL. To disable it and use legacy daily bars set self.settings.daily_precise_end_time = False.");
+            }
+
             // perform end of time step checks, such as enforcing underlying securities are in raw data mode
             OnEndOfTimeStep();
         }
@@ -1044,6 +1061,42 @@ namespace QuantConnect.Algorithm
         }
 
         /// <summary>
+        /// Event handler to be called when there's been a split event
+        /// </summary>
+        /// <param name="splits">The current time slice splits</param>
+        [DocumentationAttribute(HandlingData)]
+        public virtual void OnSplits(Splits splits)
+        {
+        }
+
+        /// <summary>
+        /// Event handler to be called when there's been a dividend event
+        /// </summary>
+        /// <param name="dividends">The current time slice dividends</param>
+        [DocumentationAttribute(HandlingData)]
+        public virtual void OnDividends(Dividends dividends)
+        {
+        }
+
+        /// <summary>
+        /// Event handler to be called when there's been a delistings event
+        /// </summary>
+        /// <param name="delistings">The current time slice delistings</param>
+        [DocumentationAttribute(HandlingData)]
+        public virtual void OnDelistings(Delistings delistings)
+        {
+        }
+
+        /// <summary>
+        /// Event handler to be called when there's been a symbol changed event
+        /// </summary>
+        /// <param name="symbolsChanged">The current time slice symbol changed events</param>
+        [DocumentationAttribute(HandlingData)]
+        public virtual void OnSymbolChangedEvents(SymbolChangedEvents symbolsChanged)
+        {
+        }
+
+        /// <summary>
         /// Event fired each time the we add/remove securities from the data feed
         /// </summary>
         /// <param name="changes">Security additions/removals for this time step</param>
@@ -1052,72 +1105,6 @@ namespace QuantConnect.Algorithm
         public virtual void OnSecuritiesChanged(SecurityChanges changes)
         {
         }
-
-        // <summary>
-        // Event - v2.0 TRADEBAR EVENT HANDLER: (Pattern) Basic template for user to override when requesting tradebar data.
-        // </summary>
-        // <param name="data"></param>
-        //public void OnData(TradeBars data)
-        //{
-        //
-        //}
-
-        // <summary>
-        // Event - v2.0 QUOTEBAR EVENT HANDLER: (Pattern) Basic template for user to override when requesting quotebar data.
-        // </summary>
-        // <param name="data"></param>
-        //public void OnData(QuoteBars data)
-        //{
-        //
-        //}
-
-        // <summary>
-        // Event - v2.0 TICK EVENT HANDLER: (Pattern) Basic template for user to override when requesting tick data.
-        // </summary>
-        // <param name="data">List of Tick Data</param>
-        //public void OnData(Ticks data)
-        //{
-        //
-        //}
-
-        // <summary>
-        // Event - v2.0 OPTIONCHAIN EVENT HANDLER: (Pattern) Basic template for user to override when requesting option data.
-        // </summary>
-        // <param name="data">List of Tick Data</param>
-        //public void OnData(OptionChains data)
-        //{
-        //
-        //}
-
-        // <summary>
-        // Event - v2.0 SPLIT EVENT HANDLER: (Pattern) Basic template for user to override when inspecting split data.
-        // </summary>
-        // <param name="data">IDictionary of Split Data Keyed by Symbol String</param>
-        //public void OnData(Splits data)
-        //{
-        //
-        //}
-
-        // <summary>
-        // Event - v2.0 DIVIDEND EVENT HANDLER: (Pattern) Basic template for user to override when inspecting dividend data
-        // </summary>
-        // <param name="data">IDictionary of Dividend Data Keyed by Symbol String</param>
-        //public void OnData(Dividends data)
-        //{
-        //
-        //}
-
-        // <summary>
-        // Event - v2.0 DELISTING EVENT HANDLER: (Pattern) Basic template for user to override when inspecting delisting data
-        // </summary>
-        // <param name="data">IDictionary of Delisting Data Keyed by Symbol String</param>
-        //public void OnData(Delistings data)
-
-        // <summary>
-        // Event - v2.0 SYMBOL CHANGED EVENT HANDLER: (Pattern) Basic template for user to override when inspecting symbol changed data
-        // </summary>
-        // <param name="data">IDictionary of SymbolChangedEvent Data Keyed by Symbol String</param>
-        //public void OnData(SymbolChangedEvents data)
 
         /// <summary>
         /// Margin call event handler. This method is called right before the margin call orders are placed in the market.
@@ -1392,11 +1379,7 @@ namespace QuantConnect.Algorithm
                 throw new InvalidOperationException("Algorithm.SetBenchmark(): Cannot change Benchmark after algorithm initialized.");
             }
 
-            string market;
-            if (!BrokerageModel.DefaultMarkets.TryGetValue(securityType, out market))
-            {
-                market = Market.USA;
-            }
+            var market = GetMarket(null, symbol, securityType, defaultMarket: Market.USA);
 
             var benchmarkSymbol = QuantConnect.Symbol.Create(symbol, securityType, market);
             SetBenchmark(benchmarkSymbol);
@@ -1900,13 +1883,7 @@ namespace QuantConnect.Algorithm
 
             try
             {
-                if (market == null)
-                {
-                    if (!BrokerageModel.DefaultMarkets.TryGetValue(securityType, out market))
-                    {
-                        throw new KeyNotFoundException($"No default market set for security type: {securityType}");
-                    }
-                }
+                market = GetMarket(market, ticker, securityType);
 
                 Symbol symbol;
                 if (!SymbolCache.TryGetSymbol(ticker, out symbol) ||
@@ -1958,6 +1935,15 @@ namespace QuantConnect.Algorithm
                 return AddOptionContract(symbol, resolution, fillForward, leverage, extendedMarketHours);
             }
 
+            var securityResolution = resolution;
+            var securityFillForward = fillForward;
+            if (isCanonical && symbol.SecurityType.IsOption() && symbol.SecurityType != SecurityType.FutureOption)
+            {
+                // option is daily only, for now exclude FOPs
+                securityResolution = Resolution.Daily;
+                securityFillForward = false;
+            }
+
             var isFilteredSubscription = !isCanonical;
             List<SubscriptionDataConfig> configs;
             // we pass dataNormalizationMode to SubscriptionManager.SubscriptionDataConfigService.Add conditionally,
@@ -1965,8 +1951,8 @@ namespace QuantConnect.Algorithm
             if (dataNormalizationMode.HasValue)
             {
                 configs = SubscriptionManager.SubscriptionDataConfigService.Add(symbol,
-                    resolution,
-                    fillForward,
+                    securityResolution,
+                    securityFillForward,
                     extendedMarketHours,
                     isFilteredSubscription,
                     dataNormalizationMode: dataNormalizationMode.Value,
@@ -1975,8 +1961,8 @@ namespace QuantConnect.Algorithm
             else
             {
                 configs = SubscriptionManager.SubscriptionDataConfigService.Add(symbol,
-                   resolution,
-                   fillForward,
+                   securityResolution,
+                   securityFillForward,
                    extendedMarketHours,
                    isFilteredSubscription,
                    contractDepthOffset: (uint)contractDepthOffset);
@@ -1994,10 +1980,16 @@ namespace QuantConnect.Algorithm
                 if (!UniverseManager.ContainsKey(symbol))
                 {
                     var canonicalConfig = configs.First();
-                    var settings = new UniverseSettings(canonicalConfig.Resolution, leverage, fillForward, extendedMarketHours, UniverseSettings.MinimumTimeInUniverse)
+                    var universeSettingsResolution = canonicalConfig.Resolution;
+                    if (symbol.SecurityType.IsOption())
+                    {
+                        universeSettingsResolution = resolution ?? UniverseSettings.Resolution;
+                    }
+                    var settings = new UniverseSettings(universeSettingsResolution, leverage, fillForward, extendedMarketHours, UniverseSettings.MinimumTimeInUniverse)
                     {
                         Asynchronous = UniverseSettings.Asynchronous
                     };
+
                     if (symbol.SecurityType.IsOption())
                     {
                         universe = new OptionChainUniverse((Option)security, settings);
@@ -2010,7 +2002,7 @@ namespace QuantConnect.Algorithm
                         var continuousUniverseSettings = new UniverseSettings(settings)
                         {
                             ExtendedMarketHours = extendedMarketHours,
-                            DataMappingMode = dataMappingMode ?? UniverseSettings.DataMappingMode,
+                            DataMappingMode = dataMappingMode ?? UniverseSettings.GetUniverseNormalizationModeOrDefault(symbol.SecurityType, symbol.ID.Market),
                             DataNormalizationMode = dataNormalizationMode ?? UniverseSettings.GetUniverseNormalizationModeOrDefault(symbol.SecurityType),
                             ContractDepthOffset = (int)contractOffset,
                             SubscriptionDataTypes = dataTypes,
@@ -2067,13 +2059,7 @@ namespace QuantConnect.Algorithm
         [DocumentationAttribute(AddingData)]
         public Option AddOption(string underlying, Resolution? resolution = null, string market = null, bool fillForward = true, decimal leverage = Security.NullLeverage)
         {
-            if (market == null)
-            {
-                if (!BrokerageModel.DefaultMarkets.TryGetValue(SecurityType.Option, out market))
-                {
-                    throw new KeyNotFoundException($"No default market set for security type: {SecurityType.Option}");
-                }
-            }
+            market = GetMarket(market, underlying, SecurityType.Option);
 
             var underlyingSymbol = QuantConnect.Symbol.Create(underlying, SecurityType.Equity, market);
             return AddOption(underlyingSymbol, resolution, market, fillForward, leverage);
@@ -2116,13 +2102,7 @@ namespace QuantConnect.Algorithm
         {
             var optionType = QuantConnect.Symbol.GetOptionTypeFromUnderlying(underlying);
 
-            if (market == null)
-            {
-                if (!BrokerageModel.DefaultMarkets.TryGetValue(optionType, out market))
-                {
-                    throw new KeyNotFoundException($"No default market set for security type: {optionType}");
-                }
-            }
+            market = GetMarket(market, targetOption, optionType);
 
             Symbol canonicalSymbol;
 
@@ -2164,14 +2144,7 @@ namespace QuantConnect.Algorithm
             bool fillForward = true, decimal leverage = Security.NullLeverage, bool extendedMarketHours = false,
             DataMappingMode? dataMappingMode = null, DataNormalizationMode? dataNormalizationMode = null, int contractDepthOffset = 0)
         {
-            if (market == null)
-            {
-                if (!SymbolPropertiesDatabase.TryGetMarket(ticker, SecurityType.Future, out market)
-                    && !BrokerageModel.DefaultMarkets.TryGetValue(SecurityType.Future, out market))
-                {
-                    throw new KeyNotFoundException($"No default market set for security type: {SecurityType.Future}");
-                }
-            }
+            market = GetMarket(market, ticker, SecurityType.Future);
 
             Symbol canonicalSymbol;
             var alias = "/" + ticker;
@@ -2245,18 +2218,15 @@ namespace QuantConnect.Algorithm
         /// <summary>
         /// Creates and adds index options to the algorithm.
         /// </summary>
-        /// <param name="ticker">The ticker of the Index Option</param>
+        /// <param name="underlying">The underlying ticker of the Index Option</param>
         /// <param name="resolution">Resolution of the index option contracts, i.e. the granularity of the data</param>
-        /// <param name="market">Market of the index option. If no market is provided, we default to <see cref="Market.USA"/> </param>
+        /// <param name="market">The foreign exchange trading market, <seealso cref="Market"/>. Default value is null and looked up using BrokerageModel.DefaultMarkets in <see cref="AddSecurity{T}"/></param>
         /// <param name="fillForward">If true, this will fill in missing data points with the previous data point</param>
         /// <returns>Canonical Option security</returns>
         [DocumentationAttribute(AddingData)]
-        public Option AddIndexOption(string ticker, Resolution? resolution = null, string market = Market.USA, bool fillForward = true)
+        public IndexOption AddIndexOption(string underlying, Resolution? resolution = null, string market = null, bool fillForward = true)
         {
-            return AddIndexOption(
-                QuantConnect.Symbol.Create(ticker, SecurityType.Index, market),
-                resolution,
-                fillForward);
+            return AddIndexOption(underlying, null, resolution, market, fillForward);
         }
 
         /// <summary>
@@ -2267,7 +2237,7 @@ namespace QuantConnect.Algorithm
         /// <param name="fillForward">If true, this will fill in missing data points with the previous data point</param>
         /// <returns>Canonical Option security</returns>
         [DocumentationAttribute(AddingData)]
-        public Option AddIndexOption(Symbol symbol, Resolution? resolution = null, bool fillForward = true)
+        public IndexOption AddIndexOption(Symbol symbol, Resolution? resolution = null, bool fillForward = true)
         {
             return AddIndexOption(symbol, null, resolution, fillForward);
         }
@@ -2281,14 +2251,31 @@ namespace QuantConnect.Algorithm
         /// <param name="fillForward">If true, this will fill in missing data points with the previous data point</param>
         /// <returns>Canonical Option security</returns>
         [DocumentationAttribute(AddingData)]
-        public Option AddIndexOption(Symbol symbol, string targetOption, Resolution? resolution = null, bool fillForward = true)
+        public IndexOption AddIndexOption(Symbol symbol, string targetOption, Resolution? resolution = null, bool fillForward = true)
         {
             if (symbol.SecurityType != SecurityType.Index)
             {
                 throw new ArgumentException("Symbol provided must be of type SecurityType.Index");
             }
 
-            return AddOption(symbol, targetOption, resolution, symbol.ID.Market, fillForward);
+            return (IndexOption)AddOption(symbol, targetOption, resolution, symbol.ID.Market, fillForward);
+        }
+
+        /// <summary>
+        /// Creates and adds index options to the algorithm.
+        /// </summary>
+        /// <param name="underlying">The underlying ticker of the Index Option</param>
+        /// <param name="targetOption">The target option ticker. This is useful when the option ticker does not match the underlying, e.g. SPX index and the SPXW weekly option. If null is provided will use underlying</param>
+        /// <param name="resolution">Resolution of the index option contracts, i.e. the granularity of the data</param>
+        /// <param name="market">The foreign exchange trading market, <seealso cref="Market"/>. Default value is null and looked up using BrokerageModel.DefaultMarkets in <see cref="AddSecurity{T}"/></param>
+        /// <param name="fillForward">If true, this will fill in missing data points with the previous data point</param>
+        /// <returns>Canonical Option security</returns>
+        [DocumentationAttribute(AddingData)]
+        public IndexOption AddIndexOption(string underlying, string targetOption, Resolution? resolution = null, string market = null, bool fillForward = true)
+        {
+            return AddIndexOption(
+                QuantConnect.Symbol.Create(underlying, SecurityType.Index, GetMarket(market, underlying, SecurityType.Index)),
+                targetOption, resolution, fillForward);
         }
 
         /// <summary>
@@ -2300,14 +2287,14 @@ namespace QuantConnect.Algorithm
         /// <returns>Index Option Contract</returns>
         /// <exception cref="ArgumentException">The provided Symbol is not an Index Option</exception>
         [DocumentationAttribute(AddingData)]
-        public Option AddIndexOptionContract(Symbol symbol, Resolution? resolution = null, bool fillForward = true)
+        public IndexOption AddIndexOptionContract(Symbol symbol, Resolution? resolution = null, bool fillForward = true)
         {
-            if (symbol.SecurityType != SecurityType.IndexOption)
+            if (symbol.SecurityType != SecurityType.IndexOption || symbol.IsCanonical())
             {
-                throw new ArgumentException("Symbol provided must be of type SecurityType.IndexOption");
+                throw new ArgumentException("Symbol provided must be non-canonical and of type SecurityType.IndexOption");
             }
 
-            return AddOptionContract(symbol, resolution, fillForward);
+            return (IndexOption)AddOptionContract(symbol, resolution, fillForward);
         }
 
         /// <summary>
@@ -2340,6 +2327,11 @@ namespace QuantConnect.Algorithm
                 underlyingSecurity = AddSecurity(underlying, resolution, fillForward, leverage, extendedMarketHours);
                 underlyingConfigs = SubscriptionManager.SubscriptionDataConfigService
                     .GetSubscriptionDataConfigs(underlying);
+            }
+            else if (underlyingSecurity != null && underlyingSecurity.IsDelisted)
+            {
+                throw new ArgumentException($"The underlying {underlying.SecurityType} asset ({underlying.Value}) is delisted " +
+                    $"(current time is {Time})");
             }
             else
             {
@@ -2706,7 +2698,7 @@ namespace QuantConnect.Algorithm
         [DocumentationAttribute(Logging)]
         public void Debug(string message)
         {
-            if (!_liveMode && (message == "" || _previousDebugMessage == message)) return;
+            if (!_liveMode && (string.IsNullOrEmpty(message) || _previousDebugMessage == message)) return;
             _debugMessages.Enqueue(message);
             _previousDebugMessage = message;
         }
@@ -2756,7 +2748,7 @@ namespace QuantConnect.Algorithm
         [DocumentationAttribute(Logging)]
         public void Log(string message)
         {
-            if (!_liveMode && message == "") return;
+            if (!_liveMode && string.IsNullOrEmpty(message)) return;
             _logMessages.Enqueue(message);
         }
 
@@ -2805,7 +2797,7 @@ namespace QuantConnect.Algorithm
         [DocumentationAttribute(Logging)]
         public void Error(string message)
         {
-            if (!_liveMode && (message == "" || _previousErrorMessage == message)) return;
+            if (!_liveMode && (string.IsNullOrEmpty(message) || _previousErrorMessage == message)) return;
             _errorMessages.Enqueue(message);
             _previousErrorMessage = message;
         }
@@ -2856,7 +2848,7 @@ namespace QuantConnect.Algorithm
         public void Error(Exception error)
         {
             var message = error.Message;
-            if (!_liveMode && (message == "" || _previousErrorMessage == message)) return;
+            if (!_liveMode && (string.IsNullOrEmpty(message) || _previousErrorMessage == message)) return;
             _errorMessages.Enqueue(message);
             _previousErrorMessage = message;
         }
@@ -2921,13 +2913,7 @@ namespace QuantConnect.Algorithm
             DataMappingMode? mappingMode = null, DataNormalizationMode? normalizationMode = null)
             where T : Security
         {
-            if (market == null)
-            {
-                if (!BrokerageModel.DefaultMarkets.TryGetValue(securityType, out market))
-                {
-                    throw new Exception("No default market set for security type: " + securityType);
-                }
-            }
+            market = GetMarket(market, ticker, securityType);
 
             Symbol symbol;
             if (!SymbolCache.TryGetSymbol(ticker, out symbol) ||
@@ -3050,7 +3036,6 @@ namespace QuantConnect.Algorithm
         /// Event invocator for the <see cref="InsightsGenerated"/> event
         /// </summary>
         /// <param name="insights">The collection of insights generaed at the current time step</param>
-        /// <param name="clone">Will emit a clone of the generated insights</param>
         [DocumentationAttribute(AlgorithmFramework)]
         private void OnInsightsGenerated(Insight[] insights)
         {
@@ -3323,6 +3308,201 @@ namespace QuantConnect.Algorithm
         public List<Fundamental> Fundamentals(List<Symbol> symbols)
         {
             return symbols.Select(symbol => Fundamentals(symbol)).ToList();
+        }
+
+        /// <summary>
+        /// Get the option chain for the specified symbol at the current time (<see cref="Time"/>)
+        /// </summary>
+        /// <param name="symbol">
+        /// The symbol for which the option chain is asked for.
+        /// It can be either the canonical option or the underlying symbol.
+        /// </param>
+        /// <param name="flatten">
+        /// Whether to flatten the resulting data frame. Used from Python when accessing <see cref="OptionChain.DataFrame"/>.
+        /// See <see cref="History(PyObject, int, Resolution?, bool?, bool?, DataMappingMode?, DataNormalizationMode?, int?, bool)"/>
+        /// </param>
+        /// <returns>The option chain</returns>
+        /// <remarks>
+        /// As of 2024/09/11, future options chain will not contain any additional data (e.g. daily price data, implied volatility and greeks),
+        /// it will be populated with the contract symbol only. This is expected to change in the future.
+        /// </remarks>
+        [DocumentationAttribute(AddingData)]
+        public OptionChain OptionChain(Symbol symbol, bool flatten = false)
+        {
+            return OptionChains(new[] { symbol }, flatten).Values.SingleOrDefault() ??
+                new OptionChain(GetCanonicalOptionSymbol(symbol), Time.Date, flatten);
+        }
+
+        /// <summary>
+        /// Get the option chains for the specified symbols at the current time (<see cref="Time"/>)
+        /// </summary>
+        /// <param name="symbols">
+        /// The symbols for which the option chain is asked for.
+        /// It can be either the canonical options or the underlying symbols.
+        /// </param>
+        /// <param name="flatten">
+        /// Whether to flatten the resulting data frame. Used from Python when accessing <see cref="OptionChain.DataFrame"/>.
+        /// See <see cref="History(PyObject, int, Resolution?, bool?, bool?, DataMappingMode?, DataNormalizationMode?, int?, bool)"/>
+        /// </param>
+        /// <returns>The option chains</returns>
+        [DocumentationAttribute(AddingData)]
+        public OptionChains OptionChains(IEnumerable<Symbol> symbols, bool flatten = false)
+        {
+            var canonicalSymbols = symbols.Select(GetCanonicalOptionSymbol).ToList();
+            var optionCanonicalSymbols = canonicalSymbols.Where(x => x.SecurityType != SecurityType.FutureOption);
+            var futureOptionCanonicalSymbols = canonicalSymbols.Where(x => x.SecurityType == SecurityType.FutureOption);
+
+            var optionChainsData = History(optionCanonicalSymbols, 1).GetUniverseData()
+                .Select(x => (x.Keys.Single(), x.Values.Single().Cast<OptionUniverse>()));
+
+            // TODO: For FOPs, we fall back to the option chain provider until OptionUniverse supports them
+            var futureOptionChainsData = futureOptionCanonicalSymbols.Select(symbol =>
+            {
+                var optionChainData = OptionChainProvider.GetOptionContractList(symbol, Time)
+                    .Select(contractSymbol => new OptionUniverse()
+                    {
+                        Symbol = contractSymbol,
+                        EndTime = Time.Date,
+                    });
+                return (symbol, optionChainData);
+            });
+
+            var time = Time.Date;
+            var chains = new OptionChains(time, flatten);
+            foreach (var (symbol, contracts) in optionChainsData.Concat(futureOptionChainsData))
+            {
+                var symbolProperties = SymbolPropertiesDatabase.GetSymbolProperties(symbol.ID.Market, symbol, symbol.SecurityType, AccountCurrency);
+                var optionChain = new OptionChain(symbol, time, contracts, symbolProperties, flatten);
+                chains.Add(symbol, optionChain);
+            }
+
+            return chains;
+        }
+
+        /// <summary>
+        /// Get an authenticated link to execute the given command instance
+        /// </summary>
+        /// <param name="command">The target command</param>
+        /// <returns>The authenticated link</returns>
+        public string Link(object command)
+        {
+            var typeName = command.GetType().Name;
+            if (command is Command || typeName.Contains("AnonymousType", StringComparison.InvariantCultureIgnoreCase))
+            {
+                return CommandLink(typeName, command);
+            }
+            return string.Empty;
+        }
+
+        /// <summary>
+        /// Register a command type to be used
+        /// </summary>
+        /// <typeparam name="T">The command type</typeparam>
+        public void AddCommand<T>() where T : Command
+        {
+            _registeredCommands[typeof(T).Name] = (CallbackCommand command) =>
+            {
+                var commandInstance = JsonConvert.DeserializeObject<T>(command.Payload);
+                return commandInstance.Run(this);
+            };
+        }
+
+        /// <summary>
+        /// Run a callback command instance
+        /// </summary>
+        /// <param name="command">The callback command instance</param>
+        /// <returns>The command result</returns>
+        public CommandResultPacket RunCommand(CallbackCommand command)
+        {
+            bool? result = null;
+            if (_registeredCommands.TryGetValue(command.Type, out var target))
+            {
+                try
+                {
+                    result = target.Invoke(command);
+                }
+                catch (Exception ex)
+                {
+                    QuantConnect.Logging.Log.Error(ex);
+                    if (_oneTimeCommandErrors.Add(command.Type))
+                    {
+                        Log($"Unexpected error running command '{command.Type}' error: '{ex.Message}'");
+                    }
+                }
+            }
+            else
+            {
+                if (_oneTimeCommandErrors.Add(command.Type))
+                {
+                    Log($"Detected unregistered command type '{command.Type}', will be ignored");
+                }
+            }
+            return new CommandResultPacket(command, result) { CommandName = command.Type };
+        }
+
+        /// <summary>
+        /// Generic untyped command call handler
+        /// </summary>
+        /// <param name="data">The associated data</param>
+        /// <returns>True if success, false otherwise. Returning null will disable command feedback</returns>
+        public virtual bool? OnCommand(dynamic data)
+        {
+            return true;
+        }
+
+        /// <summary>
+        /// Helper method to get a market for a given security type and ticker
+        /// </summary>
+        private string GetMarket(string market, string ticker, SecurityType securityType, string defaultMarket = null)
+        {
+            if (string.IsNullOrEmpty(market))
+            {
+                if (securityType == SecurityType.Index && IndexSymbol.TryGetIndexMarket(ticker, out market))
+                {
+                    return market;
+                }
+
+                if (securityType == SecurityType.Future && SymbolPropertiesDatabase.TryGetMarket(ticker, securityType, out market))
+                {
+                    return market;
+                }
+
+                if (!BrokerageModel.DefaultMarkets.TryGetValue(securityType, out market))
+                {
+                    if (string.IsNullOrEmpty(defaultMarket))
+                    {
+                        throw new KeyNotFoundException($"No default market set for security type: {securityType}");
+                    }
+                    return defaultMarket;
+                }
+            }
+            return market;
+        }
+
+        private string CommandLink(string typeName, object command)
+        {
+            var payload = new Dictionary<string, dynamic> { { "projectId", ProjectId }, { "command", command } };
+            if (_registeredCommands.ContainsKey(typeName))
+            {
+                payload["command[$type]"] = typeName;
+            }
+            return Api.Authentication.Link("live/commands/create", payload);
+        }
+
+        private static Symbol GetCanonicalOptionSymbol(Symbol symbol)
+        {
+            // We got the underlying
+            if (symbol.SecurityType.HasOptions())
+            {
+                return QuantConnect.Symbol.CreateCanonicalOption(symbol);
+            }
+
+            if (symbol.SecurityType.IsOption())
+            {
+                return symbol.Canonical;
+            }
+
+            throw new ArgumentException($"The symbol {symbol} is not an option or an underlying symbol.");
         }
 
         /// <summary>

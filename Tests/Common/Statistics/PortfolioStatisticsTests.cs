@@ -15,10 +15,15 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Globalization;
+using System.IO;
 using System.Linq;
 using NUnit.Framework;
 using QuantConnect.Data;
 using QuantConnect.Statistics;
+using QuantConnect.Tests.Indicators;
+using static Microsoft.FSharp.Core.ByRefKinds;
 
 namespace QuantConnect.Tests.Common.Statistics
 {
@@ -81,6 +86,69 @@ namespace QuantConnect.Tests.Common.Statistics
             Assert.AreEqual(expectedSharpeRatio, statistics.SharpeRatio);
             Assert.AreEqual(expectedTrackingError, statistics.TrackingError);
             Assert.AreEqual(expectedProbabilisticSharpeRatio, statistics.ProbabilisticSharpeRatio);
+        }
+
+        [Test]
+        public void VaRMatchesExternalData()
+        {
+            var externalFileName = "spy_valueatrisk.csv";
+            var data = TestHelper.GetCsvFileStream(externalFileName);
+            var listPerformance = new List<double>();
+
+            var iteration = 0;
+            foreach (var row in data)
+            {
+                if (iteration == 0)
+                {
+                    iteration++;
+                    continue;
+                }
+
+                Parse.TryParse(row["returns"], NumberStyles.Float, out double returns);
+                listPerformance.Add(returns);
+
+                Parse.TryParse(row["VaR_99"], NumberStyles.Float, out decimal expected99);
+                Parse.TryParse(row["VaR_95"], NumberStyles.Float, out decimal expected95);
+
+                var statistics = GetPortfolioStatistics(
+                    true,
+                    _tradingDaysPerYear,
+                    listPerformance,
+                    new List<double> { 0, 0 });
+
+                Assert.AreEqual(Math.Round(expected99, 3), statistics.ValueAtRisk99);
+                Assert.AreEqual(Math.Round(expected95, 3), statistics.ValueAtRisk95);
+            }
+        }
+
+        [Test]
+        public void VaRIsZeroIfLessThan2Samples()
+        {
+            var listPerformance = new List<double> { 0.006196177273682046 };
+
+            var statistics = GetPortfolioStatistics(
+                    true,
+                    _tradingDaysPerYear,
+                    listPerformance,
+                    new List<double> { 0, 0 });
+
+            Assert.Zero(statistics.ValueAtRisk99);
+            Assert.Zero(statistics.ValueAtRisk95);
+        }
+
+        [Test]
+        public void PortfolioStatisticsDoesNotFailWhenAnnualPerformanceIsLarge()
+        {
+            var profitLoss = new SortedDictionary<DateTime, decimal>();
+            var equity = new SortedDictionary<DateTime, decimal>();
+            var portfolioTurnover = new SortedDictionary<DateTime, decimal>();
+            var listPerformance = new List<double>() { 0.6281421, 2.3815, -0.620932, 0.2795571 };
+            var listBenchmark = new List<double>() { -0.0015610669230773247, -0.024440492469623223, 0.008600225248460628, -0.020019532547249266 };
+            var startingCapital = 100000;
+            var riskFreeInterestRateModel = new InterestRateProvider();
+            var tradingDaysPerYear = 252;
+
+            Assert.DoesNotThrow(() => new PortfolioStatistics(profitLoss, equity, portfolioTurnover, listPerformance, listBenchmark, startingCapital, riskFreeInterestRateModel, tradingDaysPerYear));
         }
 
         /// <summary>

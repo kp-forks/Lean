@@ -99,7 +99,7 @@ namespace QuantConnect.Lean.Engine
                 SystemHandlers.Notify.SetAuthentication(job);
 
                 //-> Set the result handler type for this algorithm job, and launch the associated result thread.
-                AlgorithmHandlers.Results.Initialize(job, SystemHandlers.Notify, SystemHandlers.Api, AlgorithmHandlers.Transactions);
+                AlgorithmHandlers.Results.Initialize(new (job, SystemHandlers.Notify, SystemHandlers.Api, AlgorithmHandlers.Transactions, AlgorithmHandlers.MapFileProvider));
 
                 IBrokerage brokerage = null;
                 DataManager dataManager = null;
@@ -208,7 +208,8 @@ namespace QuantConnect.Lean.Engine
                             // disable parallel history requests for live trading
                             parallelHistoryRequestsEnabled: !_liveMode,
                             dataPermissionManager: AlgorithmHandlers.DataPermissionsManager,
-                            objectStore: algorithm.ObjectStore
+                            objectStore: algorithm.ObjectStore,
+                            algorithmSettings: algorithm.Settings
                         )
                     );
 
@@ -333,7 +334,7 @@ namespace QuantConnect.Lean.Engine
                                 // -> Using this Data Feed,
                                 // -> Send Orders to this TransactionHandler,
                                 // -> Send Results to ResultHandler.
-                                algorithmManager.Run(job, algorithm, synchronizer, AlgorithmHandlers.Transactions, AlgorithmHandlers.Results, AlgorithmHandlers.RealTime, SystemHandlers.LeanManager, isolator.CancellationToken);
+                                algorithmManager.Run(job, algorithm, synchronizer, AlgorithmHandlers.Transactions, AlgorithmHandlers.Results, AlgorithmHandlers.RealTime, SystemHandlers.LeanManager, isolator.CancellationTokenSource);
                             }
                             catch (Exception err)
                             {
