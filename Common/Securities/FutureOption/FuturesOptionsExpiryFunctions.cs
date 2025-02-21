@@ -30,6 +30,7 @@ namespace QuantConnect.Securities.FutureOption
         private static readonly Symbol _on = Symbol.CreateOption(Symbol.Create("NG", SecurityType.Future, Market.NYMEX), Market.NYMEX, default(OptionStyle), default(OptionRight), default(decimal), SecurityIdentifier.DefaultDate);
         private static readonly Symbol _ozb = Symbol.CreateOption(Symbol.Create("ZB", SecurityType.Future, Market.CBOT), Market.CBOT, default(OptionStyle), default(OptionRight), default(decimal), SecurityIdentifier.DefaultDate);
         private static readonly Symbol _ozc = Symbol.CreateOption(Symbol.Create("ZC", SecurityType.Future, Market.CBOT), Market.CBOT, default(OptionStyle), default(OptionRight), default(decimal), SecurityIdentifier.DefaultDate);
+        private static readonly Symbol _ozn = Symbol.CreateOption(Symbol.Create("ZN", SecurityType.Future, Market.CBOT), Market.CBOT, default(OptionStyle), default(OptionRight), default(decimal), SecurityIdentifier.DefaultDate);
         private static readonly Symbol _ozs = Symbol.CreateOption(Symbol.Create("ZS", SecurityType.Future, Market.CBOT), Market.CBOT, default(OptionStyle), default(OptionRight), default(decimal), SecurityIdentifier.DefaultDate);
         private static readonly Symbol _ozt = Symbol.CreateOption(Symbol.Create("ZT", SecurityType.Future, Market.CBOT), Market.CBOT, default(OptionStyle), default(OptionRight), default(decimal), SecurityIdentifier.DefaultDate);
         private static readonly Symbol _ozw = Symbol.CreateOption(Symbol.Create("ZW", SecurityType.Future, Market.CBOT), Market.CBOT, default(OptionStyle), default(OptionRight), default(decimal), SecurityIdentifier.DefaultDate);
@@ -45,9 +46,7 @@ namespace QuantConnect.Securities.FutureOption
             // Trading terminates 7 business days before the 26th calendar of the month prior to the contract month. https://www.cmegroup.com/trading/energy/crude-oil/light-sweet-crude_contractSpecs_options.html#optionProductId=190
             {_lo, expiryMonth => {
                 var twentySixthDayOfPreviousMonthFromContractMonth = expiryMonth.AddMonths(-1).AddDays(-(expiryMonth.Day - 1)).AddDays(25);
-                var holidays = _mhdb.GetEntry(_lo.ID.Market, _lo.Underlying, SecurityType.Future)
-                    .ExchangeHours
-                    .Holidays;
+                var holidays = FuturesExpiryUtilityFunctions.GetExpirationHolidays(_lo.ID.Market, _lo.Underlying.ID.Symbol);
 
                 return FuturesExpiryUtilityFunctions.AddBusinessDays(twentySixthDayOfPreviousMonthFromContractMonth, -7, holidays);
             }},
@@ -57,6 +56,7 @@ namespace QuantConnect.Securities.FutureOption
             { _on, expiryMonth => FourthLastBusinessDayInPrecedingMonthFromContractMonth(_on.Underlying, expiryMonth, 0, 0, noFridays: false) },
             { _ozb, expiryMonth => FridayBeforeTwoBusinessDaysBeforeEndOfMonth(_ozb.Underlying, expiryMonth) },
             { _ozc, expiryMonth => FridayBeforeTwoBusinessDaysBeforeEndOfMonth(_ozc.Underlying, expiryMonth) },
+            { _ozn, expiryMonth => FridayBeforeTwoBusinessDaysBeforeEndOfMonth(_ozn.Underlying, expiryMonth) },
             { _ozs, expiryMonth => FridayBeforeTwoBusinessDaysBeforeEndOfMonth(_ozs.Underlying, expiryMonth) },
             { _ozt, expiryMonth => FridayBeforeTwoBusinessDaysBeforeEndOfMonth(_ozt.Underlying, expiryMonth) },
             { _ozw, expiryMonth => FridayBeforeTwoBusinessDaysBeforeEndOfMonth(_ozw.Underlying, expiryMonth) },
@@ -132,15 +132,13 @@ namespace QuantConnect.Securities.FutureOption
         /// <returns>Expiry DateTime of the Future Option</returns>
         private static DateTime FridayBeforeTwoBusinessDaysBeforeEndOfMonth(Symbol underlyingFuture, DateTime expiryMonth)
         {
-            var holidays = _mhdb.GetEntry(underlyingFuture.ID.Market, underlyingFuture, SecurityType.Future)
-                .ExchangeHours
-                .Holidays;
+            var holidays = FuturesExpiryUtilityFunctions.GetExpirationHolidays(underlyingFuture.ID.Market, underlyingFuture.ID.Symbol);
 
             var expiryMonthPreceding = expiryMonth.AddMonths(-1).AddDays(-(expiryMonth.Day - 1));
             var fridayBeforeSecondLastBusinessDay = FuturesExpiryUtilityFunctions.NthLastBusinessDay(
                 expiryMonthPreceding,
                 2,
-                holidayList: holidays).AddDays(-1);
+                holidays).AddDays(-1);
 
             while (fridayBeforeSecondLastBusinessDay.DayOfWeek != DayOfWeek.Friday)
             {
@@ -163,12 +161,10 @@ namespace QuantConnect.Securities.FutureOption
         /// <returns>Expiry DateTime of the Future Option</returns>
         private static DateTime FourthLastBusinessDayInPrecedingMonthFromContractMonth(Symbol underlyingFuture, DateTime expiryMonth, int hour, int minutes, bool noFridays = true)
         {
-            var holidays = _mhdb.GetEntry(underlyingFuture.ID.Market, underlyingFuture, SecurityType.Future)
-                .ExchangeHours
-                .Holidays;
+            var holidays = FuturesExpiryUtilityFunctions.GetExpirationHolidays(underlyingFuture.ID.Market, underlyingFuture.ID.Symbol);
 
             var expiryMonthPreceding = expiryMonth.AddMonths(-1);
-            var fourthLastBusinessDay = FuturesExpiryUtilityFunctions.NthLastBusinessDay(expiryMonthPreceding, 4, holidayList: holidays);
+            var fourthLastBusinessDay = FuturesExpiryUtilityFunctions.NthLastBusinessDay(expiryMonthPreceding, 4, holidays);
 
             if (noFridays)
             {

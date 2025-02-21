@@ -49,7 +49,7 @@ namespace QuantConnect.Brokerages.Backtesting
         /// <summary>
         /// This is the algorithm under test
         /// </summary>
-        protected readonly IAlgorithm Algorithm;
+        protected IAlgorithm Algorithm { get; init; }
 
         /// <summary>
         /// Creates a new BacktestingBrokerage for the specified algorithm
@@ -466,12 +466,12 @@ namespace QuantConnect.Brokerages.Backtesting
                     var result = option.OptionAssignmentModel.GetAssignment(new OptionAssignmentParameters(option));
                     if (result != null && result.Quantity != 0)
                     {
-                        var request = new SubmitOrderRequest(OrderType.OptionExercise, option.Type, option.Symbol, Math.Abs(result.Quantity), 0m, 0m, 0m, Algorithm.UtcTime, result.Tag);
                         if (!_pendingOptionAssignments.Add(option.Symbol))
                         {
                             throw new InvalidOperationException($"Duplicate option exercise order request for symbol {option.Symbol}. Please contact support");
                         }
-                        Algorithm.Transactions.ProcessRequest(request);
+
+                        OnOptionNotification(new OptionNotificationEventArgs(option.Symbol, 0, result.Tag));
                     }
                 }
             }
@@ -526,7 +526,7 @@ namespace QuantConnect.Brokerages.Backtesting
             // and underlying future delisting at the same time.
             foreach (var delisting in delistings?.Values.OrderBy(x => !x.Symbol.SecurityType.IsOption()))
             {
-                Log.Trace($"BacktestingBrokerage.ProcessDelistings(): Delisting {delisting.Type}: {delisting.Symbol.Value}, UtcTime: {Algorithm.UtcTime}, DelistingTime: {delisting.Time}");
+                Log.Debug($"BacktestingBrokerage.ProcessDelistings(): Delisting {delisting.Type}: {delisting.Symbol.Value}, UtcTime: {Algorithm.UtcTime}, DelistingTime: {delisting.Time}");
                 if (delisting.Type == DelistingType.Warning)
                 {
                     // We do nothing with warnings

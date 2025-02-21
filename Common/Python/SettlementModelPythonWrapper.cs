@@ -22,16 +22,15 @@ namespace QuantConnect.Python
     /// <summary>
     /// Provides an implementation of <see cref="ISettlementModel"/> that wraps a <see cref="PyObject"/> object
     /// </summary>
-    public class SettlementModelPythonWrapper : ISettlementModel
+    public class SettlementModelPythonWrapper : BasePythonWrapper<ISettlementModel>, ISettlementModel
     {
-        private readonly dynamic _model;
-
+        /// <summary>
         /// Constructor for initialising the <see cref="SettlementModelPythonWrapper"/> class with wrapped <see cref="PyObject"/> object
         /// </summary>
         /// <param name="model">Settlement Python Model</param>
         public SettlementModelPythonWrapper(PyObject model)
+            : base(model)
         {
-            _model = model;
         }
 
         /// <summary>
@@ -40,10 +39,7 @@ namespace QuantConnect.Python
         /// <param name="applyFundsParameters">The funds application parameters</param>
         public void ApplyFunds(ApplyFundsSettlementModelParameters applyFundsParameters)
         {
-            using (Py.GIL())
-            {
-                _model.ApplyFunds(applyFundsParameters);
-            }
+            InvokeMethod(nameof(ApplyFunds), applyFundsParameters);
         }
 
         /// <summary>
@@ -52,10 +48,21 @@ namespace QuantConnect.Python
         /// <param name="settlementParameters">The settlement parameters</param>
         public void Scan(ScanSettlementModelParameters settlementParameters)
         {
-            using (Py.GIL())
+            InvokeMethod(nameof(Scan), settlementParameters);
+        }
+
+        /// <summary>
+        /// Gets the unsettled cash amount for the security
+        /// </summary>
+        public CashAmount GetUnsettledCash()
+        {
+            var result = InvokeMethod<CashAmount?>(nameof(GetUnsettledCash));
+            if (result == null)
             {
-                _model.Scan(settlementParameters);
+                return default;
             }
+
+            return result.Value;
         }
     }
 }

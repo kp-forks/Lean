@@ -22,6 +22,7 @@ using Fasterflect;
 using QuantConnect.AlgorithmFactory;
 using QuantConnect.Brokerages;
 using QuantConnect.Configuration;
+using QuantConnect.Data;
 using QuantConnect.Data.Market;
 using QuantConnect.Interfaces;
 using QuantConnect.Lean.Engine.DataFeeds;
@@ -100,7 +101,7 @@ namespace QuantConnect.Lean.Engine.Setup
             IAlgorithm algorithm;
 
             // limit load times to 10 seconds and force the assembly to have exactly one derived type
-            var loader = new Loader(false, algorithmNodePacket.Language, BaseSetupHandler.AlgorithmCreationTimeout, names => names.SingleOrAlgorithmTypeName(Config.Get("algorithm-type-name")), WorkerThread);
+            var loader = new Loader(false, algorithmNodePacket.Language, BaseSetupHandler.AlgorithmCreationTimeout, names => names.SingleOrAlgorithmTypeName(Config.Get("algorithm-type-name", algorithmNodePacket.AlgorithmId)), WorkerThread);
             var complete = loader.TryCreateAlgorithmInstanceWithIsolator(assemblyPath, algorithmNodePacket.RamAllocation, out algorithm, out error);
             if (!complete) throw new AlgorithmSetupException($"During the algorithm initialization, the following exception has occurred: {error}");
 
@@ -162,6 +163,7 @@ namespace QuantConnect.Lean.Engine.Setup
                 return false;
             }
 
+            BaseSetupHandler.Setup(parameters);
 
             // attach to the message event to relay brokerage specific initialization messages
             EventHandler<BrokerageMessageEvent> brokerageOnMessage = (sender, args) =>
@@ -242,7 +244,6 @@ namespace QuantConnect.Lean.Engine.Setup
 
                         //Algorithm is live, not backtesting:
                         algorithm.SetAlgorithmMode(liveJob.AlgorithmMode);
-                        algorithm.SetDeploymentTarget(liveJob.DeploymentTarget);
 
                         //Initialize the algorithm's starting date
                         algorithm.SetDateTime(DateTime.UtcNow);
@@ -312,6 +313,9 @@ namespace QuantConnect.Lean.Engine.Setup
                 // after algorithm was initialized, should set trading days per year for our great portfolio statistics
                 BaseSetupHandler.SetBrokerageTradingDayPerYear(algorithm);
 
+                var dataAggregator = Composer.Instance.GetPart<IDataAggregator>();
+                dataAggregator?.Initialize(new () { AlgorithmSettings = algorithm.Settings });
+
                 //Finalize Initialization
                 algorithm.PostInitialize();
 
@@ -378,6 +382,9 @@ namespace QuantConnect.Lean.Engine.Setup
             return true;
         }
 
+        /// <summary>
+        /// Loads existing holdings and orders
+        /// </summary>
         protected bool LoadExistingHoldingsAndOrders(IBrokerage brokerage, IAlgorithm algorithm, SetupHandlerParameters parameters)
         {
             Log.Trace("BrokerageSetupHandler.Setup(): Fetching open orders from brokerage...");

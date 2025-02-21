@@ -30,6 +30,7 @@ using QuantConnect.Lean.Engine.DataFeeds;
 using QuantConnect.Data.UniverseSelection;
 using QuantConnect.Lean.Engine.DataFeeds.WorkScheduling;
 using HistoryRequest = QuantConnect.Data.HistoryRequest;
+using QuantConnect.Securities;
 
 namespace QuantConnect.Lean.Engine.Setup
 {
@@ -45,23 +46,48 @@ namespace QuantConnect.Lean.Engine.Setup
         public static TimeSpan AlgorithmCreationTimeout { get; } = TimeSpan.FromSeconds(Config.GetDouble("algorithm-creation-timeout", 90));
 
         /// <summary>
+        /// Primary entry point to setup a new algorithm
+        /// </summary>
+        /// <param name="parameters">The parameters object to use</param>
+        /// <returns>True on successfully setting up the algorithm state, or false on error.</returns>
+        public static bool Setup(SetupHandlerParameters parameters)
+        {
+            var algorithm = parameters.Algorithm;
+            var job = parameters.AlgorithmNodePacket;
+
+            algorithm?.SetDeploymentTarget(job.DeploymentTarget);
+
+            Log.Trace($"BaseSetupHandler.Setup({job.DeploymentTarget}): UID: {job.UserId.ToStringInvariant()}, " +
+                $"PID: {job.ProjectId.ToStringInvariant()}, Version: {job.Version}, Source: {job.RequestSource}"
+            );
+            return true;
+        }
+
+        /// <summary>
         /// Will first check and add all the required conversion rate securities
         /// and later will seed an initial value to them.
         /// </summary>
         /// <param name="algorithm">The algorithm instance</param>
         /// <param name="universeSelection">The universe selection instance</param>
+        /// <param name="currenciesToUpdateWhiteList">
+        /// If passed, the currencies in the CashBook that are contained in this list will be updated.
+        /// By default, if not passed (null), all currencies in the cashbook without a properly set up currency conversion will be updated.
+        /// This is not intended for actual algorithms but for tests or for this method to be used as a helper.
+        /// </param>
         public static void SetupCurrencyConversions(
             IAlgorithm algorithm,
-            UniverseSelection universeSelection)
+            UniverseSelection universeSelection,
+            IReadOnlyCollection<string> currenciesToUpdateWhiteList = null)
         {
             // this is needed to have non-zero currency conversion rates during warmup
             // will also set the Cash.ConversionRateSecurity
             universeSelection.EnsureCurrencyDataFeeds(SecurityChanges.None);
 
             // now set conversion rates
-            var cashToUpdate = algorithm.Portfolio.CashBook.Values
-                .Where(x => x.CurrencyConversion != null && x.ConversionRate == 0)
-                .ToList();
+            Func<Cash, bool> cashToUpdateFilter = currenciesToUpdateWhiteList == null
+                ? (x) => x.CurrencyConversion != null && x.ConversionRate == 0
+                : (x) => currenciesToUpdateWhiteList.Contains(x.Symbol);
+            var cashToUpdate = algorithm.Portfolio.CashBook.Values.Where(cashToUpdateFilter).ToList();
 
             var securitiesToUpdate = cashToUpdate
                 .SelectMany(x => x.CurrencyConversion.ConversionRateSecurities)
@@ -89,7 +115,8 @@ namespace QuantConnect.Lean.Engine.Setup
                     60,
                     resolution,
                     hours,
-                    configToUse.DataTimeZone);
+                    configToUse.DataTimeZone,
+                    configToUse.Type);
                 var endTime = algorithm.Time;
 
                 historyRequests.Add(historyRequestFactory.CreateHistoryRequest(

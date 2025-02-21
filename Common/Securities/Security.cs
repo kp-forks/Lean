@@ -100,6 +100,7 @@ namespace QuantConnect.Securities
         public SymbolProperties SymbolProperties
         {
             get;
+            protected set;
         }
 
         /// <summary>
@@ -415,7 +416,12 @@ namespace QuantConnect.Securities
             _subscriptionsBag = new ();
             QuoteCurrency = quoteCurrency;
             SymbolProperties = symbolProperties;
-            IsTradable = true;
+
+            if (Symbol.SecurityType != SecurityType.Index)
+            {
+                IsTradable = true;
+            }
+
             Cache = cache;
             Exchange = exchange;
             DataFilter = dataFilter;
@@ -938,6 +944,17 @@ namespace QuantConnect.Securities
         /// <param name="value">The property value</param>
         public void Add(string key, object value)
         {
+            Set(key, value);
+        }
+
+        /// <summary>
+        /// Sets the specified custom property.
+        /// This allows us to use the security object as a dynamic object for quick storage.
+        /// </summary>
+        /// <param name="key">The property key</param>
+        /// <param name="value">The property value</param>
+        public void Set(string key, object value)
+        {
             Cache.Properties[key] = value;
         }
 
@@ -1135,6 +1152,26 @@ namespace QuantConnect.Securities
             }
 
             return value;
+        }
+
+        /// <summary>
+        /// Applies the split to the security
+        /// </summary>
+        internal void ApplySplit(Split split)
+        {
+            Cache.ApplySplit(split);
+            UpdateMarketPrice(Cache.GetData());
+        }
+
+        /// <summary>
+        /// Updates the symbol properties of this security
+        /// </summary>
+        internal virtual void UpdateSymbolProperties(SymbolProperties symbolProperties)
+        {
+            if (symbolProperties != null)
+            {
+                SymbolProperties = symbolProperties;
+            }
         }
     }
 }

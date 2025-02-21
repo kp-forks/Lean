@@ -67,6 +67,11 @@ namespace QuantConnect
         public const string HKD = "HKD";
 
         /// <summary>
+        /// JPY (Japanese yen) currency string
+        /// </summary>
+        public const string JPY = "JPY";
+
+        /// <summary>
         /// Null currency used when a real one is not required
         /// </summary>
         public const string NullCurrency = "QCC";
@@ -81,7 +86,7 @@ namespace QuantConnect
         {
             {USD, "$"},
             {GBP, "₤"},
-            {"JPY", "¥"},
+            {JPY, "¥"},
             {EUR, "€"},
             {"NZD", "$"},
             {"AUD", "$"},
@@ -181,6 +186,7 @@ namespace QuantConnect
         ///
         /// We use this to allow setting cash amounts for these stablecoins without needing a conversion
         /// security.
+        /// </summary>
         private static readonly HashSet<string> _stableCoinsWithoutPairsCoinbase = new HashSet<string>
         {
             "USDCUSD"

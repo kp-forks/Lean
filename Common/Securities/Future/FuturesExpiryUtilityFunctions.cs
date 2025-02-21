@@ -39,16 +39,25 @@ namespace QuantConnect.Securities.Future
         };
 
         /// <summary>
+        /// True to account for bank holidays which will adjust futures expiration dates
+        /// </summary>
+        public static bool BankHolidays { get; set; }
+
+        /// <summary>
         /// Get holiday list from the MHDB given the market and the symbol of the security
         /// </summary>
         /// <param name="market">The market the exchange resides in, i.e, 'usa', 'fxcm', ect...</param>
         /// <param name="symbol">The particular symbol being traded</param>s
-        public static HashSet<DateTime> GetHolidays(string market, string symbol)
+        internal static HashSet<DateTime> GetExpirationHolidays(string market, string symbol)
         {
-            return MarketHoursDatabase.FromDataFolder()
+            var exchangeHours = MarketHoursDatabase.FromDataFolder()
                         .GetEntry(market, symbol, SecurityType.Future)
-                        .ExchangeHours
-                        .Holidays;
+                        .ExchangeHours;
+            if (BankHolidays)
+            {
+                return exchangeHours.Holidays.Concat(exchangeHours.BankHolidays).ToHashSet();
+            }
+            return exchangeHours.Holidays;
         }
 
         /// <summary>
@@ -423,20 +432,20 @@ namespace QuantConnect.Securities.Future
 
         private static readonly Dictionary<string, int> ExpiriesPriorMonth = new Dictionary<string, int>
         {
-            { Futures.Energies.ArgusLLSvsWTIArgusTradeMonth, 1 },
-            { Futures.Energies.ArgusPropaneSaudiAramco, 1 },
-            { Futures.Energies.BrentCrude, 2 },
-            { Futures.Energies.BrentLastDayFinancial, 2 },
-            { Futures.Energies.CrudeOilWTI, 1 },
-            { Futures.Energies.MicroCrudeOilWTI, 1 },
-            { Futures.Energies.Gasoline, 1 },
-            { Futures.Energies.HeatingOil, 1 },
-            { Futures.Energies.MarsArgusVsWTITradeMonth, 1 },
-            { Futures.Energies.NaturalGas, 1 },
-            { Futures.Energies.NaturalGasHenryHubLastDayFinancial, 1 },
-            { Futures.Energies.NaturalGasHenryHubPenultimateFinancial, 1 },
-            { Futures.Energies.WTIHoustonArgusVsWTITradeMonth, 1 },
-            { Futures.Energies.WTIHoustonCrudeOil, 1 },
+            { Futures.Energy.ArgusLLSvsWTIArgusTradeMonth, 1 },
+            { Futures.Energy.ArgusPropaneSaudiAramco, 1 },
+            { Futures.Energy.BrentCrude, 2 },
+            { Futures.Energy.BrentLastDayFinancial, 2 },
+            { Futures.Energy.CrudeOilWTI, 1 },
+            { Futures.Energy.MicroCrudeOilWTI, 1 },
+            { Futures.Energy.Gasoline, 1 },
+            { Futures.Energy.HeatingOil, 1 },
+            { Futures.Energy.MarsArgusVsWTITradeMonth, 1 },
+            { Futures.Energy.NaturalGas, 1 },
+            { Futures.Energy.NaturalGasHenryHubLastDayFinancial, 1 },
+            { Futures.Energy.NaturalGasHenryHubPenultimateFinancial, 1 },
+            { Futures.Energy.WTIHoustonArgusVsWTITradeMonth, 1 },
+            { Futures.Energy.WTIHoustonCrudeOil, 1 },
             { Futures.Softs.Sugar11, 1 },
             { Futures.Softs.Sugar11CME, 1 }
         };

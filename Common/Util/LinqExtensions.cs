@@ -27,18 +27,6 @@ namespace QuantConnect.Util
     public static class LinqExtensions
     {
         /// <summary>
-        /// Creates a dictionary enumerable of key value pairs
-        /// </summary>
-        /// <typeparam name="K">The key type</typeparam>
-        /// <typeparam name="V">The value type</typeparam>
-        /// <param name="enumerable">The IEnumerable of KeyValuePair instances to convert to a dictionary</param>
-        /// <returns>A dictionary holding the same data as the enumerable</returns>
-        public static Dictionary<K, V> ToDictionary<K, V>(this IEnumerable<KeyValuePair<K, V>> enumerable)
-        {
-            return enumerable.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
-        }
-
-        /// <summary>
         /// Creates a new read-only dictionary from the key value pairs
         /// </summary>
         /// <typeparam name="K">The key type</typeparam>
@@ -100,18 +88,6 @@ namespace QuantConnect.Util
         public static ImmutableArray<TResult> ToImmutableArray<T, TResult>(this IEnumerable<T> enumerable, Func<T, TResult> selector)
         {
             return enumerable.Select(selector).ToImmutableArray();
-        }
-
-        /// <summary>
-        /// Produces the set difference of two sequences by using the default equality comparer to compare values.
-        /// </summary>
-        /// <typeparam name="T">The type of the elements of the input sequences.</typeparam>
-        /// <param name="enumerable">An <see cref="T:System.Collections.Generic.IEnumerable`1"/> whose elements that are not also in <paramref name="set"/> will be returned.</param>
-        /// <param name="set">An <see cref="T:System.Collections.Generic.IEnumerable`1"/> whose elements that also occur in the first sequence will cause those elements to be removed from the returned sequence.</param>
-        /// <returns>A sequence that contains the set difference of the elements of two sequences.</returns>
-        public static IEnumerable<T> Except<T>(this IEnumerable<T> enumerable, ISet<T> set)
-        {
-            return enumerable.Where(item => !set.Contains(item));
         }
 
         /// <summary>

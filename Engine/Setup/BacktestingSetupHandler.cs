@@ -90,7 +90,7 @@ namespace QuantConnect.Lean.Engine.Setup
             IAlgorithm algorithm;
 
             var debugNode = algorithmNodePacket as BacktestNodePacket;
-            var debugging = debugNode != null && debugNode.IsDebugging || Config.GetBool("debugging", false);
+            var debugging = debugNode != null && debugNode.Debugging || Config.GetBool("debugging", false);
 
             if (debugging && !BaseSetupHandler.InitializeDebugging(algorithmNodePacket, WorkerThread))
             {
@@ -98,7 +98,7 @@ namespace QuantConnect.Lean.Engine.Setup
             }
 
             // Limit load times to 90 seconds and force the assembly to have exactly one derived type
-            var loader = new Loader(debugging, algorithmNodePacket.Language, BaseSetupHandler.AlgorithmCreationTimeout, names => names.SingleOrAlgorithmTypeName(Config.Get("algorithm-type-name")), WorkerThread);
+            var loader = new Loader(debugging, algorithmNodePacket.Language, BaseSetupHandler.AlgorithmCreationTimeout, names => names.SingleOrAlgorithmTypeName(Config.Get("algorithm-type-name", algorithmNodePacket.AlgorithmId)), WorkerThread);
             var complete = loader.TryCreateAlgorithmInstanceWithIsolator(assemblyPath, algorithmNodePacket.RamAllocation, out algorithm, out error);
             if (!complete) throw new AlgorithmSetupException($"During the algorithm initialization, the following exception has occurred: {error}");
 
@@ -132,9 +132,7 @@ namespace QuantConnect.Lean.Engine.Setup
                 throw new ArgumentException("Expected BacktestNodePacket but received " + parameters.AlgorithmNodePacket.GetType().Name);
             }
 
-            Log.Trace($"BacktestingSetupHandler.Setup(): Setting up job: UID: {job.UserId.ToStringInvariant()}, " +
-                $"PID: {job.ProjectId.ToStringInvariant()}, Version: {job.Version}, Source: {job.RequestSource}"
-            );
+            BaseSetupHandler.Setup(parameters);
 
             if (algorithm == null)
             {
@@ -164,7 +162,6 @@ namespace QuantConnect.Lean.Engine.Setup
 
                     //Algorithm is backtesting, not live:
                     algorithm.SetAlgorithmMode(job.AlgorithmMode);
-                    algorithm.SetDeploymentTarget(job.DeploymentTarget);
 
                     //Set the source impl for the event scheduling
                     algorithm.Schedule.SetEventSchedule(parameters.RealTimeHandler);

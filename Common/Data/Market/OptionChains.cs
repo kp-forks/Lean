@@ -1,4 +1,4 @@
-﻿/*
+/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
  * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
  *
@@ -13,7 +13,11 @@
  * limitations under the License.
 */
 
+using Python.Runtime;
+using QuantConnect.Python;
 using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace QuantConnect.Data.Market
 {
@@ -22,20 +26,41 @@ namespace QuantConnect.Data.Market
     /// </summary>
     public class OptionChains : DataDictionary<OptionChain>
     {
+        private static readonly IEnumerable<string> _flattenedDfIndexNames = new[] { "canonical", "symbol" };
+
+        private readonly Lazy<PyObject> _dataframe;
+        private readonly bool _flatten;
+
         /// <summary>
         /// Creates a new instance of the <see cref="OptionChains"/> dictionary
         /// </summary>
         public OptionChains()
+            : this(default, true)
         {
         }
 
         /// <summary>
         /// Creates a new instance of the <see cref="OptionChains"/> dictionary
         /// </summary>
-        public OptionChains(DateTime time)
-            : base(time)
+        public OptionChains(bool flatten)
+            : this(default, flatten)
         {
         }
+
+        /// <summary>
+        /// Creates a new instance of the <see cref="OptionChains"/> dictionary
+        /// </summary>
+        public OptionChains(DateTime time, bool flatten = true)
+            : base(time)
+        {
+            _flatten = flatten;
+            _dataframe = new Lazy<PyObject>(InitializeDataFrame, isThreadSafe: false);
+        }
+
+        /// <summary>
+        /// The data frame representation of the option chains
+        /// </summary>
+        public PyObject DataFrame => _dataframe.Value;
 
         /// <summary>
         /// Gets or sets the OptionChain with the specified ticker.
@@ -56,5 +81,23 @@ namespace QuantConnect.Data.Market
         /// <param name="symbol">The Symbol of the element to get or set.</param>
         /// <remarks>Wraps the base implementation to enable indexing in python algorithms due to pythonnet limitations</remarks>
         public new OptionChain this[Symbol symbol] { get { return base[symbol]; } set { base[symbol] = value; } }
+
+        private PyObject InitializeDataFrame()
+        {
+            if (!PythonEngine.IsInitialized)
+            {
+                return null;
+            }
+
+            var dataFrames = this.Select(kvp => kvp.Value.DataFrame).ToList();
+
+            if (_flatten)
+            {
+                var canonicalSymbols = this.Select(kvp => kvp.Key);
+                return PandasConverter.ConcatDataFrames(dataFrames, keys: canonicalSymbols, names: _flattenedDfIndexNames, sort: false);
+            }
+
+            return PandasConverter.ConcatDataFrames(dataFrames, sort: false);
+        }
     }
 }

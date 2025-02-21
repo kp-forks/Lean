@@ -21,10 +21,10 @@ using System.Linq;
 using QuantConnect.Brokerages;
 using QuantConnect.Configuration;
 using QuantConnect.Interfaces;
-using QuantConnect.Lean.Engine.TransactionHandlers;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Packets;
+using QuantConnect.Securities.Positions;
 using QuantConnect.Statistics;
 using QuantConnect.Util;
 
@@ -77,28 +77,23 @@ namespace QuantConnect.Lean.Engine.Results
 
             // Delay uploading first packet
             _nextS3Update = StartTime.AddSeconds(5);
-
-            //Default charts:
-            Charts.AddOrUpdate(StrategyEquityKey, new Chart(StrategyEquityKey));
-            Charts[StrategyEquityKey].Series.Add(EquityKey, new CandlestickSeries(EquityKey, 0, "$"));
-            Charts[StrategyEquityKey].Series.Add(DailyPerformanceKey, new Series(DailyPerformanceKey, SeriesType.Bar, 1, "%"));
         }
 
         /// <summary>
         /// Initialize the result handler with this result packet.
         /// </summary>
-        /// <param name="job">Algorithm job packet for this result handler</param>
-        /// <param name="messagingHandler">The handler responsible for communicating messages to listeners</param>
-        /// <param name="api">The api instance used for handling logs</param>
-        /// <param name="transactionHandler">The transaction handler used to get the algorithms <see cref="Order"/> information</param>
-        public override void Initialize(AlgorithmNodePacket job, IMessagingHandler messagingHandler, IApi api, ITransactionHandler transactionHandler)
+        public override void Initialize(ResultHandlerInitializeParameters parameters)
         {
-            _job = (BacktestNodePacket)job;
+            _job = (BacktestNodePacket)parameters.Job;
             State["Name"] = _job.Name;
-            _algorithmId = job.AlgorithmId;
-            _projectId = job.ProjectId;
+            _algorithmId = _job.AlgorithmId;
+            _projectId = _job.ProjectId;
             if (_job == null) throw new Exception("BacktestingResultHandler.Constructor(): Submitted Job type invalid.");
-            base.Initialize(job, messagingHandler, api, transactionHandler);
+            base.Initialize(parameters);
+            if (!string.IsNullOrEmpty(_job.OptimizationId))
+            {
+                State["OptimizationId"] = _job.OptimizationId;
+            }
         }
 
         /// <summary>
@@ -192,6 +187,11 @@ namespace QuantConnect.Lean.Engine.Results
                         if (AlgorithmPerformanceCharts.Contains(kvp.Key))
                         {
                             performanceCharts[kvp.Key] = chart.Clone();
+                        }
+
+                        if (updates.Name == PortfolioMarginKey)
+                        {
+                            PortfolioMarginChart.RemoveSinglePointSeries(updates);
                         }
                     }
                 }
@@ -307,6 +307,11 @@ namespace QuantConnect.Lean.Engine.Results
                             result.Results.TotalPerformance,
                             result.Results.AlgorithmConfiguration,
                             result.Results.State));
+
+                        if (result.Results.Charts.TryGetValue(PortfolioMarginKey, out var marginChart))
+                        {
+                            PortfolioMarginChart.RemoveSinglePointSeries(marginChart);
+                        }
                     }
                     // Save results
                     SaveResults(key, results);
@@ -370,6 +375,9 @@ namespace QuantConnect.Lean.Engine.Results
                 result.Progress = 1;
 
                 StoreInsights();
+
+                // Save summary results
+                SaveResults($"{AlgorithmId}-summary.json", CreateResultSummary(result));
 
                 //Place result into storage.
                 StoreResult(result);
@@ -806,6 +814,44 @@ namespace QuantConnect.Lean.Engine.Results
         public void SetSummaryStatistic(string name, string value)
         {
             SummaryStatistic(name, value);
+        }
+
+        private static BacktestResult CreateResultSummary(BacktestResultPacket result)
+        {
+            // Save summary results
+            var summary = new BacktestResult
+            {
+                Charts = new Dictionary<string, Chart>(),
+                State = result.Results.State,
+                Statistics = result.Results.Statistics,
+                TotalPerformance = new()
+                {
+                    PortfolioStatistics = result.Results.TotalPerformance?.PortfolioStatistics,
+                    TradeStatistics = result.Results.TotalPerformance?.TradeStatistics
+                },
+                ServerStatistics = result.Results.ServerStatistics,
+                RuntimeStatistics = result.Results.RuntimeStatistics,
+                AlgorithmConfiguration = result.Results.AlgorithmConfiguration,
+            };
+            CandlestickSeries equity = null;
+            if (result.Results.Charts != null && result.Results.Charts.TryGetValue(StrategyEquityKey, out var chart) && chart.Series.TryGetValue(EquityKey, out var series))
+            {
+                equity = (CandlestickSeries)series;
+                var samplePeriod = Math.Min(7, series.Values.Count / 100);
+                if (samplePeriod > 1)
+                {
+                    var sampler = new SeriesSampler(TimeSpan.FromDays(samplePeriod));
+                    equity = (CandlestickSeries)sampler.Sample(series, Time.BeginningOfTime, Time.EndOfTime, truncateValues: true);
+                }
+                var chartClone = chart.CloneEmpty();
+                chartClone.AddSeries(equity);
+                summary.Charts[StrategyEquityKey] = chartClone;
+            }
+            else
+            {
+                Log.Trace($"BacktestingResultHandler.CreateResultSummary(): '{StrategyEquityKey}' chart not found");
+            }
+            return summary;
         }
     }
 }

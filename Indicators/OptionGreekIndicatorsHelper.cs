@@ -14,13 +14,14 @@
 */
 
 using System;
+using System.Runtime.CompilerServices;
 using MathNet.Numerics.Distributions;
 using QuantConnect.Util;
 
 namespace QuantConnect.Indicators
 {
     /// <summary>
-    /// Helper clas for option greeks related indicators
+    /// Helper class for option greeks related indicators
     /// </summary>
     public class OptionGreekIndicatorsHelper
     {
@@ -28,22 +29,26 @@ namespace QuantConnect.Indicators
         /// Number of steps in binomial tree simulation to obtain Greeks/IV
         /// </summary>
         public const int Steps = 200;
-     
-        internal static decimal BlackTheoreticalPrice(decimal volatility, decimal spotPrice, decimal strikePrice, decimal timeToExpiration, decimal riskFreeRate, OptionRight optionType)
+
+        /// <summary>
+        /// Returns the Black theoretical price for the given arguments
+        /// </summary>
+        public static double BlackTheoreticalPrice(double volatility, double spotPrice, double strikePrice, double timeToExpiration, double riskFreeRate, double dividendYield, OptionRight optionType)
         {
-            var d1 = CalculateD1(spotPrice, strikePrice, timeToExpiration, riskFreeRate, volatility);
+            var d1 = CalculateD1(spotPrice, strikePrice, timeToExpiration, riskFreeRate, dividendYield, volatility);
             var d2 = CalculateD2(d1, volatility, timeToExpiration);
             var norm = new Normal();
 
-            var optionPrice = 0.0m;
-
+            var optionPrice = 0.0;
             if (optionType == OptionRight.Call)
             {
-                optionPrice = spotPrice * DecimalMath(norm.CumulativeDistribution, d1) - strikePrice * DecimalMath(Math.Exp, -riskFreeRate * timeToExpiration) * DecimalMath(norm.CumulativeDistribution, d2);
+                optionPrice = spotPrice * Math.Exp(-dividendYield * timeToExpiration) * norm.CumulativeDistribution(d1)
+                    - strikePrice * Math.Exp(-riskFreeRate * timeToExpiration) * norm.CumulativeDistribution(d2);
             }
             else if (optionType == OptionRight.Put)
             {
-                optionPrice = strikePrice * DecimalMath(Math.Exp, -riskFreeRate * timeToExpiration) * DecimalMath(norm.CumulativeDistribution, -d2) - spotPrice * DecimalMath(norm.CumulativeDistribution, -d1);
+                optionPrice = strikePrice * Math.Exp(-riskFreeRate * timeToExpiration) * norm.CumulativeDistribution(-d2)
+                    - spotPrice * Math.Exp(-dividendYield * timeToExpiration) * norm.CumulativeDistribution(-d1);
             }
             else
             {
@@ -53,11 +58,11 @@ namespace QuantConnect.Indicators
             return optionPrice;
         }
 
-        internal static decimal CalculateD1(decimal spotPrice, decimal strikePrice, decimal timeToExpiration, decimal riskFreeRate, decimal volatility)
+        internal static double CalculateD1(double spotPrice, double strikePrice, double timeToExpiration, double riskFreeRate, double dividendYield, double volatility)
         {
-            var numerator = DecimalMath(Math.Log, spotPrice / strikePrice) + (riskFreeRate + 0.5m * volatility * volatility) * timeToExpiration;
-            var denominator = volatility * DecimalMath(Math.Sqrt, timeToExpiration);
-            if (denominator == 0m)
+            var numerator = Math.Log(spotPrice / strikePrice) + (riskFreeRate - dividendYield + 0.5 * volatility * volatility) * timeToExpiration;
+            var denominator = volatility *  Math.Sqrt(Math.Max(0, timeToExpiration));
+            if (denominator == 0)
             {
                 // return a random variable large enough to produce normal probability density close to 1
                 return 10;
@@ -65,52 +70,115 @@ namespace QuantConnect.Indicators
             return numerator / denominator;
         }
 
-        private static decimal CalculateD2(decimal d1, decimal volatility, decimal timeToExpiration)
+        internal static double CalculateD2(double d1, double volatility, double timeToExpiration)
         {
-            return d1 - volatility * DecimalMath(Math.Sqrt, timeToExpiration);
+            return d1 - volatility * Math.Sqrt(Math.Max(0, timeToExpiration));
         }
 
-        // Reference: https://en.wikipedia.org/wiki/Binomial_options_pricing_model#Step_1:_Create_the_binomial_price_tree
-        internal static decimal CRRTheoreticalPrice(decimal volatility, decimal spotPrice, decimal strikePrice,
-            decimal timeToExpiration, decimal riskFreeRate, OptionRight optionType, int steps = Steps)
+        /// <summary>
+        /// Creates a Binomial Theoretical Price Tree from the given parameters
+        /// </summary>
+        /// <remarks>Reference: https://en.wikipedia.org/wiki/Binomial_options_pricing_model#Step_1:_Create_the_binomial_price_tree</remarks>
+        public static double CRRTheoreticalPrice(double volatility, double spotPrice, double strikePrice,
+            double timeToExpiration, double riskFreeRate, double dividendYield, OptionRight optionType, int steps = Steps)
         {
             var deltaTime = timeToExpiration / steps;
-            var upFactor = DecimalMath(Math.Exp, volatility * DecimalMath(Math.Sqrt, deltaTime));
-            if (upFactor == 1m)
+            var upFactor = Math.Exp(volatility * Math.Sqrt(deltaTime));
+            if (upFactor == 1)
             {
                 // Introduce a very small factor to avoid constant tree while staying low volatility
-                upFactor = 1.0001m;
+                upFactor = 1.0001;
             }
-            var discount = DecimalMath(Math.Exp, -riskFreeRate * deltaTime);
-            var probUp = upFactor * (upFactor - discount) / (upFactor * upFactor - 1);
-            var probDown = discount - probUp;
+            var downFactor = 1 / upFactor;
+            var probUp = (Math.Exp((riskFreeRate - dividendYield) * deltaTime) - downFactor) / (upFactor - downFactor);
 
-            var values = new decimal[steps + 1];
-            var exerciseValues = new decimal[steps + 1];
+            return BinomialTheoreticalPrice(deltaTime, probUp, upFactor, riskFreeRate, spotPrice, strikePrice, optionType, steps);
+        }
 
-            for (int i = 0; i <= steps; i++)
+        /// <summary>
+        /// Creates the Forward Binomial Theoretical Price Tree from the given parameters
+        /// </summary>
+        public static double ForwardTreeTheoreticalPrice(double volatility, double spotPrice, double strikePrice,
+            double timeToExpiration, double riskFreeRate, double dividendYield, OptionRight optionType, int steps = Steps)
+        {
+            var deltaTime = timeToExpiration / steps;
+            var discount = Math.Exp((riskFreeRate - dividendYield) * deltaTime);
+            var volatilityTimeSqrtDeltaTime = volatility * Math.Sqrt(deltaTime);
+            var upFactor = Math.Exp(volatilityTimeSqrtDeltaTime) * discount;
+            var downFactor = Math.Exp(-volatilityTimeSqrtDeltaTime) * discount;
+            if (upFactor - downFactor == 0)
             {
-                var nextPrice = spotPrice * Convert.ToDecimal(Math.Pow((double)upFactor, 2 * i - steps));
-                values[i] = OptionPayoff.GetIntrinsicValue(nextPrice, strikePrice, optionType);
+                // Introduce a very small factor
+                // to avoid constant tree while staying low volatility
+                upFactor = 1.0001;
+                downFactor = 0.9999;
             }
+            var probUp = (discount - downFactor) / (upFactor - downFactor);
 
-            for (int period = steps - 1; period >= 0; period--)
+            return BinomialTheoreticalPrice(deltaTime, probUp, upFactor, riskFreeRate, spotPrice, strikePrice, optionType, steps);
+        }
+
+        private static double BinomialTheoreticalPrice(double deltaTime, double probUp, double upFactor, double riskFreeRate,
+           double spotPrice, double strikePrice, OptionRight optionType, int steps = Steps)
+        {
+            var probDown = 1 - probUp;
+            var values = new double[steps + 1];
+            // Cache for exercise values for Call options to avoid recalculating them
+            var exerciseValues = optionType == OptionRight.Call ? new double[2 * steps] : null;
+
+            for (int i = 0; i < (exerciseValues?.Length ?? values.Length); i++)
             {
-                for (int i = 0; i <= period; i++)
+                if (i < values.Length)
                 {
-                    var binomialValue = values[i] * probDown + values[i + 1] * probUp;
-                    var nextPrice = spotPrice * Convert.ToDecimal(Math.Pow((double)upFactor, 2 * i - period));
-                    var exerciseValue = OptionPayoff.GetIntrinsicValue(nextPrice, strikePrice, optionType);
-                    values[i] = Math.Max(binomialValue, exerciseValue);
+                    var nextPrice = spotPrice * Math.Pow(upFactor, 2 * i - steps);
+                    values[i] = OptionPayoff.GetIntrinsicValue(nextPrice, strikePrice, optionType);
+                }
+
+                if (optionType == OptionRight.Call)
+                {
+                    var nextPrice = spotPrice * Math.Pow(upFactor, i - steps);
+                    exerciseValues[i] = OptionPayoff.GetIntrinsicValue(nextPrice, strikePrice, optionType);
+                }
+            }
+
+            var factor = Math.Exp(-riskFreeRate * deltaTime);
+            var factorA = factor * probDown;
+            var factorB = factor * probUp;
+
+            for (var period = steps - 1; period >= 0; period--)
+            {
+                for (var i = 0; i <= period; i++)
+                {
+                    var binomialValue = values[i] * factorA + values[i + 1] * factorB;
+                    // No advantage for American put option to exercise early in risk-neutral setting
+                    if (optionType == OptionRight.Put)
+                    {
+                        values[i] = binomialValue;
+                        continue;
+                    }
+                    values[i] = Math.Max(binomialValue, exerciseValues[2 * i - period + steps]);
                 }
             }
 
             return values[0];
         }
 
-        internal static decimal DecimalMath(Func<double, double> function, decimal input)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double TimeTillExpiry(DateTime expiry, DateTime referenceDate)
         {
-            return Convert.ToDecimal(function((double)input));
+            return (expiry - referenceDate).TotalDays / 365d;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static double Divide(double numerator, double denominator)
+        {
+            if (denominator != 0)
+            {
+                return numerator / denominator;
+            }
+
+            //Log.Error("OptionGreekIndicatorsHelper.Divide(): Division by zero detected. Returning 0.");
+            return 0;
         }
     }
 }
